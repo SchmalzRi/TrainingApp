@@ -2,75 +2,89 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Hypertrophy Tracker — v2.4.3</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Hypertrophy Tracker — v2.5.0</title>
 <meta name="theme-color" content="#0b0e12">
 <style>
   :root{
-    --bg:#f8fafc; --fg:#0b0f19; --card:#fff; --muted:#6b7280; --border:#e5e7eb; --set:#f3f4f6;}
+    --bg:#f8fafc; --fg:#0b0f19; --card:#ffffff; --muted:#6b7280; --border:#e5e7eb; --set:#f3f4f6;
+  }
   .dark{
-    --bg:#0b0e12; --fg:#e5e7eb; --card:#111418; --muted:#98a2b3; --border:#23262b; --set:#141821;}
+    --bg:#0b0e12; --fg:#e5e7eb; --card:#111418; --muted:#98a2b3; --border:#23262b; --set:#141821;
+  }
 
-  *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial;}
+  *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial}
   html,body{height:100%}
-  body{margin:0;background:var(--bg);color:var(--fg);} /* ✅ picks up dark vars now */
+  body{margin:0;background:var(--bg);color:var(--fg)}
 
-  .container{max-width:960px;margin:0 auto;padding:16px 16px 64px;}
-  h1,h2,h3,h4,h5,h6{color:var(--fg); margin:0}
-  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .container{max-width:clamp(320px,92vw,720px);margin:0 auto;padding:16px 16px 64px}
+  h1{font-size:22px;margin:0}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .spacer{flex:1}
 
-  .button{border:1px solid var(--border);background:var(--card);color:var(--fg);padding:8px 10px;border-radius:10px;cursor:pointer}
+  .button{border:1px solid var(--border);background:var(--card);color:var(--fg);padding:12px 14px;border-radius:12px;cursor:pointer;min-height:44px}
   .button.ghost{background:transparent}
   .button.destructive{background:#7f1d1d;color:#fff;border-color:#7f1d1d}
 
-  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px}
   .muted{color:var(--muted);font-size:12px}
 
-  label{display:block;font-size:12px;margin-bottom:4px;color:var(--fg);} /* ✅ label text visible in dark */
   input,select,textarea{
-    width:100%;padding:8px;border:1px solid var(--border);border-radius:10px;
-    background:var(--card);color:var(--fg); /* ✅ input text visible in dark */
+    width:100%;border:1px solid var(--border);border-radius:12px;
+    background:var(--card);color:var(--fg);
+    padding:12px 14px;min-height:48px;font-size:16px
   }
-  input::placeholder, textarea::placeholder{color:var(--muted)} /* ✅ placeholder contrast */
+  textarea{min-height:52px}
+  .dark input,.dark select,.dark textarea{color:#fff;background:#0e1116;border-color:#2a2f37}
+  ::placeholder{color:var(--muted)}
+  .dark ::placeholder{color:#9aa3af}
 
-  .grid{display:grid;gap:10px}
+  .grid{display:grid;gap:12px}
   @media(min-width:900px){.grid-4{grid-template-columns:repeat(4,1fr)}}
-  .set{background:var(--set);border:1px solid var(--border);border-radius:12px;padding:10px}
+  .set{background:var(--set);border:1px solid var(--border);border-radius:14px;padding:12px}
+  .dark .set{background:#121722;border-color:#2a2f37}
 
-  .badge{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--border);cursor:pointer}
+  .badge{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer}
   .badge.active{background:#2563eb;color:#fff;border-color:#2563eb}
   .pr{background:#16a34a;color:#fff;padding:2px 6px;border-radius:8px;font-size:12px;margin-left:8px}
   .title-row{display:flex;justify-content:space-between;align-items:center;gap:12px}
-</style>
 
+  h3{margin:14px 0 8px;font-size:18px}
+</style>
 </head>
 <body>
 <div id="root"></div>
 
-<!-- React 18 UMD + Babel (no build step) -->
+<!-- React 18 UMD + Babel -->
 <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-<!-- Use @babel/standalone v7 -->
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
 <script type="text/babel" data-presets="env,react">
 const {useState,useMemo,useEffect} = React;
 
-// ---------- Helpers ----------
-const STORAGE_KEY = "hypertrophy-tracker-v243";
+/* ================= Helpers ================= */
+const STORAGE_KEY = "hypertrophy-tracker-v250";
 const PR_CACHE_KEY = "hypertrophy-tracker-prcache-v1";
-const makeSet = (over={}) => ({ kg:"", kg_each:"", reps:"", tags:[], notes:"", ...over });
+const makeSet = (over={}) => ({ kg:"", kg_each:"", combo:"", tags:[], notes:"", reps:"", ...over });
 const asNumber = v => (v===""||v==null?0:Number(v));
+const parsedReps = s => {
+  if (s.reps) return asNumber(s.reps);
+  if (s.combo){
+    const m = String(s.combo).match(/\b(\d{1,3})\b/);
+    return m ? asNumber(m[1]) : 0;
+  }
+  return 0;
+};
 const totalLoad = s => {
   const kg = asNumber(s.kg);
   const kge = asNumber(s.kg_each);
   return kg>0?kg:(kge>0?kge*2:0);
 };
-const perfScore = s => totalLoad(s)*asNumber(s.reps);
+const perfScore = s => totalLoad(s)*parsedReps(s);
 
 const loadPR = () => { try{ const j=localStorage.getItem(PR_CACHE_KEY); return j?JSON.parse(j):{} } catch (e) { return {} } };
-const savePR = (c) => { try{ localStorage.setItem(PR_CACHE_KEY, JSON.stringify(c)) } catch (e){} };
+const savePR = (c) => { try{ localStorage.setItem(PR_CACHE_KEY, JSON.stringify(c)) } catch (e) {} };
 const exKey = ex => `${ex.name}__${ex.variant||''}__${ex.equipment||''}`;
 
 const toCSV = (session) => {
@@ -84,7 +98,10 @@ const toCSV = (session) => {
       const baseTags=[]; if (ex.hand_each) baseTags.push("hand-each");
       (ex.sets?.length?ex.sets:[makeSet()]).forEach((s,idx)=>{
         const tags=[...(s.tags||[]),...baseTags].filter(Boolean).join("|");
-        rows.push([b.name, ex.name, ex.variant||"", ex.equipment||"", idx+1, s.kg||"", s.kg_each||"", s.reps||"", tags, (s.notes||ex.notes||"").split(",").join(";")].join(","));
+        const reps = parsedReps(s);
+        // Put the merged field into "notes" column for export, keep numeric reps too
+        const notes = (s.combo || s.notes || "").split(",").join(";");
+        rows.push([b.name, ex.name, ex.variant||"", ex.equipment||"", idx+1, s.kg||"", s.kg_each||"", reps||"", tags, notes].join(","));
       });
     });
   });
@@ -99,7 +116,7 @@ const download = (filename, text, mime="text/plain")=>{
   URL.revokeObjectURL(url);
 };
 
-// ---------- Exercise templates ----------
+/* ================= Exercise templates ================= */
 const smithIncline = () => ({ name:"Incline Press", variant:"Smith Incline", equipment:"smith", sets:[...Array(5)].map(()=>makeSet()), notes:"2s stretch pause first rep; hips down" });
 const dbHighIncline = () => ({ name:"Incline Press", variant:"DB High-Incline", equipment:"dumbbell", sets:[...Array(5)].map(()=>makeSet()), notes:"Pause in the stretch; control wobble" });
 const lateralRaise = () => ({ name:"Lateral Raise", equipment:"dumbbell", sets:[...Array(5)].map(()=>makeSet()) });
@@ -114,7 +131,7 @@ const aroundTheWorldRaise = () => ({ name:"Around-the-World DB Raise", equipment
 
 const latPulldown = () => ({ name:"Lat Pulldown", equipment:"cable", sets:[...Array(5)].map(()=>makeSet()) });
 const triOHStandingCurlbar = () => ({ name:"Triceps OH Extension (curl bar, standing)", equipment:"cable", sets:[...Array(5)].map(()=>makeSet()) });
-const hangingLegRaise = () => ({ name:"Hanging Leg Raise", equipment:"free", sets:[...Array(5)].map(()=>makeSet({reps:""})) });
+const hangingLegRaise = () => ({ name:"Hanging Leg Raise", equipment:"free", sets:[...Array(5)].map(()=>makeSet({combo:""})) });
 const tBarRowClose = () => ({ name:"T-Bar Row (close grip)", equipment:"tbar", sets:[...Array(3)].map(()=>makeSet()) });
 const lyingTriExtIncline = () => ({ name:"Lying Triceps Ext (incline, curl bar)", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
 const deathmarchTriExt = () => ({ name:"Lying Triceps Ext (Deathmarch)", variant:"drops to 20kg", equipment:"cable", sets:[...Array(4)].map(()=>makeSet()), notes:"mark dropset in tags if used" });
@@ -129,13 +146,14 @@ const curlBarBiceps = () => ({ name:"Biceps Curl (curl bar)", equipment:"free", 
 const oneArmPulldown = () => ({ name:"1-Arm Lat Pulldown (supinated→pronated)", equipment:"cable", hand_each:true, sets:[...Array(5)].map(()=>makeSet()) });
 const skullcrusher = () => ({ name:"Skullcrusher (EZ/curl bar)", equipment:"cable", sets:[...Array(5)].map(()=>makeSet()) });
 const closeGripBenchLite = () => ({ name:"Close-Grip Bench (same bar)", equipment:"cable", sets:[...Array(5)].map(()=>makeSet()) });
-const benchLegRaises = () => ({ name:"Bench Leg Raises (negatives)", equipment:"free", sets:[...Array(4)].map(()=>makeSet({reps:""})) });
-const dragonCrunch = () => ({ name:"Dragon Crunch", equipment:"free", sets:[makeSet({reps:""})] });
+const benchLegRaises = () => ({ name:"Bench Leg Raises (negatives)", equipment:"free", sets:[...Array(4)].map(()=>makeSet({combo:""})) });
+const dragonCrunch = () => ({ name:"Dragon Crunch", equipment:"free", sets:[makeSet({combo:""})] });
 const wideGripLatRow = () => ({ name:"Wide-Grip Lat Row", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
 const inclineRopeTriPush = () => ({ name:"Incline Rope Triceps Pushdown", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
 const facePulls = () => ({ name:"Kneeling Rope Face Pull", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
 const standingRopeCurl = () => ({ name:"Standing Rope Curl", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
 
+/* ================= Defaults per workout ================= */
 const blocksW1 = () => ([
   { name:"Superset 1", exercises:[ smithIncline(), lateralRaise(), lyingCurlRope() ] },
   { name:"Superset 2", exercises:[ sitCableFly(), sitCableCurlBehind(), arnoldPress() ] },
@@ -163,7 +181,7 @@ const defaultBlocksForWorkout = (w) => {
   switch(Number(w)){ case 1: return blocksW1(); case 2: return blocksW2(); case 3: return blocksW3(); case 4: return blocksW4(); default: return blocksW1(); }
 };
 
-// ---------- Components ----------
+/* ================= Components ================= */
 function ExerciseCard({ blockIdx, exIdx, ex, session, setSession, updateField, addSet, removeLastSet, bestPR }) {
   const [showTags,setShowTags] = React.useState(false);
   const isDB = (ex.equipment==="dumbbell");
@@ -172,9 +190,7 @@ function ExerciseCard({ blockIdx, exIdx, ex, session, setSession, updateField, a
   return (
     <div className="card" style={{marginTop:12}}>
       <div className="title-row">
-        <div>
-          <div style={{fontWeight:600}}>{ex.name} {ex.variant ? <span className="muted">— {ex.variant}</span> : null}</div>
-        </div>
+        <div style={{fontWeight:600}}>{ex.name} {ex.variant ? <span className="muted">— {ex.variant}</span> : null}</div>
         {typeof ex.hand_each !== "undefined" && (
           <label className="muted" style={{display:"inline-flex",alignItems:"center",gap:8}}>
             <span>Hand each</span>
@@ -192,31 +208,42 @@ function ExerciseCard({ blockIdx, exIdx, ex, session, setSession, updateField, a
         {(ex.sets||[]).map((s,i)=>{
           const score = perfScore(s);
           const isPR = score>0 && bestAllTime>0 && score>=bestAllTime;
+
+          // Backward-compat: if old data had reps/notes but no combo, show a merged preview
+          const comboValue = (s.combo && s.combo !== "")
+            ? s.combo
+            : [s.reps||"", s.notes||""].filter(Boolean).join(" | ");
+
           return (
             <div className="set grid" key={i} style={{gridTemplateColumns:"1fr 3fr"}}>
               <div>
-                <label>{isDB ? "kg (each)":"kg"}</label>
-                <input placeholder={isDB?"kg each":"kg"} value={isDB? (s.kg_each||"") : (s.kg||"")}
-                       onChange={e=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.${isDB?"kg_each":"kg"}`, e.target.value)} />
+                <input
+                  placeholder={isDB?"kg each":"kg"}
+                  value={isDB? (s.kg_each||"") : (s.kg||"")}
+                  onChange={e=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.${isDB?"kg_each":"kg"}`, e.target.value)} />
               </div>
-              <div className="grid" style={{gridTemplateColumns:"1fr 3fr", gap:10}}>
-                <div>
-                  <label>Reps</label>
-                  <input placeholder="reps" value={s.reps||""} onChange={e=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.reps`, e.target.value)} />
-                </div>
-                <div>
-                  <label>Notes (set)</label>
-                  <input placeholder="tempo / ROM / cues" value={s.notes||""} onChange={e=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.notes`, e.target.value)} />
-                </div>
+              <div>
+                <input
+                  placeholder="reps + notes (e.g., 8 | tempo 2-1-2, cues)"
+                  value={comboValue}
+                  onChange={e=>{
+                    // update merged field and keep reps in sync (parsed)
+                    const val = e.target.value;
+                    updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.combo`, val);
+                    const m = val.match(/\b(\d{1,3})\b/);
+                    updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.reps`, m ? m[1] : "");
+                  }}
+                />
               </div>
+
               <div className="muted" style={{gridColumn:"1 / -1"}}>
                 PR score (W×R): {score}
                 {isPR && <span className="pr">All-time PR ✓</span>}
                 <span style={{marginLeft:8,fontSize:11}}>(Best: {bestAllTime})</span>
               </div>
+
               {showTags && (
                 <div style={{gridColumn:"1 / -1"}}>
-                  <label>Tags</label>
                   <div className="row" style={{gap:6,marginTop:6}}>
                     {["pause","myo","ROM-reduced","tempo-slow","tempo-2s-stretch","dropset","deathmarch"].map(tag=>{
                       const active = (s.tags||[]).includes(tag);
@@ -248,26 +275,28 @@ function ExerciseCard({ blockIdx, exIdx, ex, session, setSession, updateField, a
 function App(){
   const [session,setSession] = useState(()=>{
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved){ try{ return JSON.parse(saved) } catch{} }
+    if (saved){ try{ return JSON.parse(saved) } catch(e){} }
     const st = {
       date: new Date().toISOString().slice(0,10),
       week: 4, workout: 1, bodyweight: "", session_start_time: "",
       toggles: { has_time_for_finishers: true },
       pain:{shoulder:0}, recovery:"average", notes:"",
-      blocks: [], theme: "light"
+      blocks: defaultBlocksForWorkout(1), theme: "light", ui:{comfortable:true}
     };
-    st.blocks = defaultBlocksForWorkout(1);
     return st;
   });
   const [prCache,setPrCache] = useState(loadPR());
 
-  useEffect(() => {
-  // Put .dark on <html> so all CSS variables apply everywhere
-  document.documentElement.classList.toggle('dark', session.theme === 'dark');
-}, [session.theme]);
-  
+  // Persist + theme + a11y class
   useEffect(()=>{ localStorage.setItem(STORAGE_KEY, JSON.stringify(session)); },[session]);
+  useEffect(()=>{ document.documentElement.classList.toggle('dark', session.theme === 'dark'); },[session.theme]);
+  useEffect(()=>{
+    const comfy = !!(session.ui && session.ui.comfortable);
+    document.documentElement.classList.toggle('comfortable', comfy);
+    try{ localStorage.setItem('a11yLarge', comfy ? '1' : '0'); }catch(e){}
+  },[session.ui?.comfortable]);
 
+  // PR cache update
   useEffect(()=>{
     const next = {...prCache};
     (session.blocks||[]).forEach(b=>(b.exercises||[]).forEach(ex=>{
@@ -298,7 +327,7 @@ function App(){
 
   const blocksMarkup = useMemo(()=> (visibleBlocks||[]).map((b,bIdx)=>(
     <div key={bIdx}>
-      <h3 style={{margin:"8px 0 6px",fontSize:18}}>{b.name}</h3>
+      <h3>{b.name}</h3>
       {(b.exercises||[]).map((ex,exIdx)=>(
         <ExerciseCard key={exIdx}
           blockIdx={bIdx} exIdx={exIdx} ex={ex}
@@ -314,7 +343,7 @@ function App(){
   const exportJSON = ()=> download(`workout-${session.date}.json`, JSON.stringify(session,null,2), "application/json");
   const importJSON = (file)=>{
     const r = new FileReader();
-    r.onload = (ev)=>{ try{ setSession(JSON.parse(ev.target.result)) } catch{ alert("Invalid JSON") } };
+    r.onload = (ev)=>{ try{ setSession(JSON.parse(ev.target.result)) } catch(e){ alert("Invalid JSON") } };
     r.readAsText(file);
   };
 
@@ -347,29 +376,31 @@ function App(){
   };
 
   return (
-    <div className={session.theme==="dark"?"dark":""}>
+    <div>
       <div className="container">
         {/* Header */}
         <div className="row" style={{justifyContent:"space-between"}}>
-          <h1>Hypertrophy Tracker — v2.4.3</h1>
+          <h1>Hypertrophy Tracker — v2.5.0</h1>
           <div className="row">
             <button className="button" onClick={exportCSV}>CSV</button>
             <button className="button" onClick={exportJSON}>JSON</button>
-            <label className="button" style={{display:"inline-flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+            <label className="button" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">
               Import JSON
-              <input type="file" accept="application/json" style={{display:"none"}}
-                     onChange={e=> e.target.files?.[0] && importJSON(e.target.files[0])}/>
+              <input type="file" accept="application/json" style="display:none"
+                     onchange="if(this.files&&this.files[0]){const r=new FileReader();r.onload=(e)=>{try{window._setSession(JSON.parse(e.target.result))}catch(x){alert('Invalid JSON')}};r.readAsText(this.files[0]);}"/>
             </label>
             <button className="button destructive" onClick={()=>{
               if (!confirm("Reset current session?")) return;
-              const st = {
+              setSession({
                 date:new Date().toISOString().slice(0,10),
                 week:4, workout:1, bodyweight:"", session_start_time:"",
                 toggles:{has_time_for_finishers:true}, pain:{shoulder:0}, recovery:"average",
-                notes:"", blocks: defaultBlocksForWorkout(1), theme: "light"
-              };
-              setSession(st);
+                notes:"", blocks: defaultBlocksForWorkout(1), theme: session.theme, ui: session.ui
+              });
             }}>Reset</button>
+            <button className="button" onClick={()=> setSession(prev=> ({...prev, ui:{...(prev.ui||{}), comfortable: !(prev.ui&&prev.ui.comfortable)}}))}>
+              A11y: {session.ui?.comfortable ? 'Large ✓' : 'Large'}
+            </button>
             <button className="button ghost" onClick={toggleTheme}>{session.theme==="dark"?"Light":"Dark"}</button>
           </div>
         </div>
@@ -378,23 +409,19 @@ function App(){
         <div className="card" style={{marginTop:12}}>
           <div className="grid grid-4">
             <div>
-              <label>Week</label>
               <select value={String(session.week)} onChange={e=> setSession(prev=>({...prev, week:Number(e.target.value)}))}>
-                {[1,2,3,4,5,6].map(w=> <option key={w} value={w}>{w}</option>)}
+                {[1,2,3,4,5,6].map(w=> <option key={w} value={w}>Week {w}</option>)}
               </select>
             </div>
             <div>
-              <label>Workout</label>
               <select value={String(session.workout)} onChange={e=> onWorkoutChange(e.target.value)}>
-                {[1,2,3,4].map(w=> <option key={w} value={w}>{`W${w}`}</option>)}
+                {[1,2,3,4].map(w=> <option key={w} value={w}>{`Workout W${w}`}</option>)}
               </select>
             </div>
             <div>
-              <label>Bodyweight (kg)</label>
-              <input value={session.bodyweight} onChange={e=> setSession(prev=>({...prev, bodyweight:e.target.value}))} placeholder="88.9"/>
+              <input placeholder="Bodyweight (kg)" value={session.bodyweight} onChange={e=> setSession(prev=>({...prev, bodyweight:e.target.value}))}/>
             </div>
             <div>
-              <label>Start time</label>
               <input type="time" value={session.session_start_time} onChange={e=> setSession(prev=>({...prev, session_start_time:e.target.value}))}/>
             </div>
 
@@ -430,7 +457,7 @@ function App(){
                 <div className="title-row">
                   <div><div style={{fontWeight:600}}>Leg Module</div><div className="muted">Add one pattern</div></div>
                 </div>
-                <div className="row" style={{gap:8,marginTop:6,flexWrap:"wrap"}}>
+                <div className="row">
                   <button className="button" onClick={()=>setLegModule("curl")}>Leg Curl</button>
                   <button className="button" onClick={()=>setLegModule("ext")}>Leg Ext</button>
                   <button className="button" onClick={()=>setLegModule("rdl")}>DB RDL</button>
@@ -451,10 +478,7 @@ function App(){
         {/* Footer */}
         <div className="card" style={{marginTop:16}}>
           <div className="grid">
-            <div>
-              <label className="muted">Session notes</label>
-              <textarea rows="3" value={session.notes} onChange={e=> setSession(prev=>({...prev, notes: e.target.value}))}></textarea>
-            </div>
+            <textarea rows="3" placeholder="Session notes…" value={session.notes} onChange={e=> setSession(prev=>({...prev, notes: e.target.value}))}></textarea>
             <div className="row">
               <button className="button" onClick={exportCSV}>Export CSV</button>
               <button className="button" onClick={exportJSON}>Export JSON</button>
@@ -467,6 +491,17 @@ function App(){
       </div>
     </div>
   );
+}
+
+// helper for inline importer
+window._setSession = (obj) => {
+  try { window.__reactSetSession(obj) } catch (e) {}
+};
+
+function Root(){
+  const [session,setSession] = React.useState(null);
+  useEffect(()=>{ window.__reactSetSession = (obj)=> setSession(obj); },[]);
+  return session ? <App key="app2" /> : <App key="app1" />;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
