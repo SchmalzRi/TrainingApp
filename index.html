@@ -54,8 +54,8 @@ const totalLoad = s => {
 };
 const perfScore = s => totalLoad(s)*asNumber(s.reps);
 
-const loadPR = () => { try{ const j=localStorage.getItem(PR_CACHE_KEY); return j?JSON.parse(j):{} } catch { return {} } };
-const savePR = (c) => { try{ localStorage.setItem(PR_CACHE_KEY, JSON.stringify(c)) } catch{} };
+const loadPR = () => { try{ const j=localStorage.getItem(PR_CACHE_KEY); return j?JSON.parse(j):{} } catch (e) { return {} } };
+const savePR = (c) => { try{ localStorage.setItem(PR_CACHE_KEY, JSON.stringify(c)) } catch (e){} };
 const exKey = ex => `${ex.name}__${ex.variant||''}__${ex.equipment||''}`;
 
 const toCSV = (session) => {
