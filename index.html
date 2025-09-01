@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Hypertrophy Tracker — v2.4.2</title>
+<title>Hypertrophy Tracker — v2.4.3</title>
 <meta name="theme-color" content="#0b0e12">
 <style>
   :root{--bg:#f8fafc;--fg:#0b0f19;--card:#fff;--muted:#6b7280;--border:#e5e7eb;--set:#f3f4f6;}
@@ -33,16 +33,17 @@
 <body>
 <div id="root"></div>
 
-<!-- React via CDN + Babel for JSX (no build step) -->
+<!-- React 18 UMD + Babel (no build step) -->
 <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-<script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+<!-- Use @babel/standalone v7 -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-<script type="text/babel">
+<script type="text/babel" data-presets="env,react">
 const {useState,useMemo,useEffect} = React;
 
 // ---------- Helpers ----------
-const STORAGE_KEY = "hypertrophy-tracker-v242";
+const STORAGE_KEY = "hypertrophy-tracker-v243";
 const PR_CACHE_KEY = "hypertrophy-tracker-prcache-v1";
 const makeSet = (over={}) => ({ kg:"", kg_each:"", reps:"", tags:[], notes:"", ...over });
 const asNumber = v => (v===""||v==null?0:Number(v));
@@ -68,7 +69,7 @@ const toCSV = (session) => {
       const baseTags=[]; if (ex.hand_each) baseTags.push("hand-each");
       (ex.sets?.length?ex.sets:[makeSet()]).forEach((s,idx)=>{
         const tags=[...(s.tags||[]),...baseTags].filter(Boolean).join("|");
-        rows.push([b.name, ex.name, ex.variant||"", ex.equipment||"", idx+1, s.kg||"", s.kg_each||"", s.reps||"", tags, (s.notes||ex.notes||"").replaceAll(",",";")].join(","));
+        rows.push([b.name, ex.name, ex.variant||"", ex.equipment||"", idx+1, s.kg||"", s.kg_each||"", s.reps||"", tags, (s.notes||ex.notes||"").split(",").join(";")].join(","));
       });
     });
   });
@@ -83,7 +84,7 @@ const download = (filename, text, mime="text/plain")=>{
   URL.revokeObjectURL(url);
 };
 
-// ---------- Exercise templates (trimmed to match your spec) ----------
+// ---------- Exercise templates ----------
 const smithIncline = () => ({ name:"Incline Press", variant:"Smith Incline", equipment:"smith", sets:[...Array(5)].map(()=>makeSet()), notes:"2s stretch pause first rep; hips down" });
 const dbHighIncline = () => ({ name:"Incline Press", variant:"DB High-Incline", equipment:"dumbbell", sets:[...Array(5)].map(()=>makeSet()), notes:"Pause in the stretch; control wobble" });
 const lateralRaise = () => ({ name:"Lateral Raise", equipment:"dumbbell", sets:[...Array(5)].map(()=>makeSet()) });
@@ -158,7 +159,6 @@ function ExerciseCard({ blockIdx, exIdx, ex, session, setSession, updateField, a
       <div className="title-row">
         <div>
           <div style={{fontWeight:600}}>{ex.name} {ex.variant ? <span className="muted">— {ex.variant}</span> : null}</div>
-          {/* equipment hidden */}
         </div>
         {typeof ex.hand_each !== "undefined" && (
           <label className="muted" style={{display:"inline-flex",alignItems:"center",gap:8}}>
@@ -276,6 +276,20 @@ function App(){
     return b;
   },[session.blocks, session.toggles.has_time_for_finishers]);
 
+  const blocksMarkup = useMemo(()=> (visibleBlocks||[]).map((b,bIdx)=>(
+    <div key={bIdx}>
+      <h3 style={{margin:"8px 0 6px",fontSize:18}}>{b.name}</h3>
+      {(b.exercises||[]).map((ex,exIdx)=>(
+        <ExerciseCard key={exIdx}
+          blockIdx={bIdx} exIdx={exIdx} ex={ex}
+          session={session} setSession={setSession}
+          updateField={updateField} addSet={addSet} removeLastSet={removeLastSet}
+          bestPR={(prCache[exKey(ex)]||0)}
+        />
+      ))}
+    </div>
+  )), [visibleBlocks, session, prCache]);
+
   const exportCSV = ()=> download(`workout-${session.date}.csv`, toCSV(session), "text/csv");
   const exportJSON = ()=> download(`workout-${session.date}.json`, JSON.stringify(session,null,2), "application/json");
   const importJSON = (file)=>{
@@ -286,7 +300,6 @@ function App(){
 
   const toggleTheme = ()=> setSession(prev=> ({...prev, theme: prev.theme==="dark"?"light":"dark"}));
 
-  // Chest Alternate handler (W1/W3)
   const swapChest = (which)=>{
     setSession(prev=>{
       const s = JSON.parse(JSON.stringify(prev));
@@ -299,7 +312,6 @@ function App(){
     });
   };
 
-  // Leg module quick add (W2/W3/W4)
   const setLegModule = (kind)=>{
     setSession(prev=>{
       const s=JSON.parse(JSON.stringify(prev));
@@ -319,7 +331,7 @@ function App(){
       <div className="container">
         {/* Header */}
         <div className="row" style={{justifyContent:"space-between"}}>
-          <h1>Hypertrophy Tracker — v2.4.2</h1>
+          <h1>Hypertrophy Tracker — v2.4.3</h1>
           <div className="row">
             <button className="button" onClick={exportCSV}>CSV</button>
             <button className="button" onClick={exportJSON}>JSON</button>
@@ -395,13 +407,16 @@ function App(){
 
             {session.workout!==1 && (
               <div className="card" style={{gridColumn:"1/-1"}}>
-                <div className="title-row"><div><div style={{fontWeight:600}}>Leg Module</div><div className="muted">Add one pattern</div></div></div>
+                <div className="title-row">
+                  <div><div style={{fontWeight:600}}>Leg Module</div><div className="muted">Add one pattern</div></div>
+                </div>
                 <div className="row" style={{gap:8,marginTop:6,flexWrap:"wrap"}}>
                   <button className="button" onClick={()=>setLegModule("curl")}>Leg Curl</button>
                   <button className="button" onClick={()=>setLegModule("ext")}>Leg Ext</button>
                   <button className="button" onClick={()=>setLegModule("rdl")}>DB RDL</button>
                   <button className="button" onClick={()=>setLegModule("split")}>Split Squat</button>
-                  <button className="button ghost" onClick={()=>setLegModule("none")} style="margin-left:auto">Remove</button>
+                  <div className="spacer"></div>
+                  <button className="button ghost" onClick={()=>setLegModule("none")}>Remove</button>
                 </div>
               </div>
             )}
@@ -410,19 +425,7 @@ function App(){
 
         {/* Blocks */}
         <div style={{marginTop:16}} className="grid">
-          {useMemo(()=> (visibleBlocks||[]).map((b,bIdx)=>(
-            <div key={bIdx}>
-              <h3 style={{margin:"8px 0 6px",fontSize:18}}>{b.name}</h3>
-              {(b.exercises||[]).map((ex,exIdx)=>(
-                <ExerciseCard key={exIdx}
-                  blockIdx={bIdx} exIdx={exIdx} ex={ex}
-                  session={session} setSession={setSession}
-                  updateField={updateField} addSet={addSet} removeLastSet={removeLastSet}
-                  bestPR={(loadPR()[exKey(ex)]||0)}
-                />
-              ))}
-            </div>
-          )), [visibleBlocks, session])}
+          {blocksMarkup}
         </div>
 
         {/* Footer */}
@@ -430,7 +433,7 @@ function App(){
           <div className="grid">
             <div>
               <label className="muted">Session notes</label>
-              <textarea rows="3" value={session.notes} onChange={e=> setSession(prev=>({...prev, notes:e.target.value}))}></textarea>
+              <textarea rows="3" value={session.notes} onChange={e=> setSession(prev=>({...prev, notes: e.target.value}))}></textarea>
             </div>
             <div className="row">
               <button className="button" onClick={exportCSV}>Export CSV</button>
@@ -450,4 +453,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
 </html>
-
