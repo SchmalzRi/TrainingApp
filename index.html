@@ -1,448 +1,453 @@
-import React, { useMemo, useState, useEffect } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Download, Upload, Save, Trash2, Plus, Dumbbell, Sun, Moon } from "lucide-react";
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Hypertrophy Tracker — v2.4.2</title>
+<meta name="theme-color" content="#0b0e12">
+<style>
+  :root{--bg:#f8fafc;--fg:#0b0f19;--card:#fff;--muted:#6b7280;--border:#e5e7eb;--set:#f3f4f6;}
+  .dark{--bg:#0b0e12;--fg:#e5e7eb;--card:#111418;--muted:#98a2b3;--border:#23262b;--set:#141821;}
+  *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial;}
+  body{margin:0;background:var(--bg);color:var(--fg);}
+  .container{max-width:960px;margin:0 auto;padding:16px 16px 64px;}
+  h1{font-size:20px;margin:0;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .spacer{flex:1}
+  .button{border:1px solid var(--border);background:var(--card);color:var(--fg);padding:8px 10px;border-radius:10px;cursor:pointer}
+  .button.ghost{background:transparent}
+  .button.destructive{background:#7f1d1d;color:#fff;border-color:#7f1d1d}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px}
+  .muted{color:var(--muted);font-size:12px}
+  input,select,textarea{width:100%;padding:8px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--fg)}
+  label{display:block;font-size:12px;margin-bottom:4px}
+  .grid{display:grid;gap:10px}
+  @media(min-width:900px){.grid-4{grid-template-columns:repeat(4,1fr)}}
+  .set{background:var(--set);border:1px solid var(--border);border-radius:12px;padding:10px}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--border);cursor:pointer}
+  .badge.active{background:#2563eb;color:#fff;border-color:#2563eb}
+  .pr{background:#16a34a;color:#fff;padding:2px 6px;border-radius:8px;font-size:12px;margin-left:8px}
+  .title-row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+</style>
+</head>
+<body>
+<div id="root"></div>
 
-// ------------------------------------------------------------
-// Hypertrophy Tracker App — v2.4.2 (full build)
-// • Removed global "kg_each" clutter → only DB/Bowflex shows "kg (each)"
-// • Bigger per‑set Notes field alongside Reps
-// • Equipment label hidden in UI (kept in data)
-// • Restored Chest Alternate switch (W1: Smith Incline↔DB High‑Incline; W3: Paused Smith Flat↔DB Flat/Decline)
-// • W1 fix: Lying Cable Curl = Rope variant; added Dumbbell Curl after Arnold Press
-// • W2: Deathmarch moved to Additional finisher block (appears when Finishers visible)
-// • W3/W4: "Hand each" modifier on Standing/Sitting Cable Curls & 1‑Arm Lat Pulldown
-// • W4: Finisher Face Pull → Standing Rope Curl added under Additional
-// • Theme: stronger light/dark surfaces & inputs for real contrast
-// ------------------------------------------------------------
+<!-- React via CDN + Babel for JSX (no build step) -->
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
 
-// ---- Helpers / Types ----
-const makeSet = (over = {}) => ({ kg: "", kg_each: "", reps: "", tags: [], notes: "", ...over });
+<script type="text/babel">
+const {useState,useMemo,useEffect} = React;
+
+// ---------- Helpers ----------
 const STORAGE_KEY = "hypertrophy-tracker-v242";
 const PR_CACHE_KEY = "hypertrophy-tracker-prcache-v1";
-
-const DEFAULT_STATE = () => ({
-  date: new Date().toISOString().slice(0, 10),
-  week: 4,
-  workout: 1,
-  bodyweight: "",
-  session_start_time: "",
-  toggles: { has_time_for_finishers: true },
-  pain: { shoulder: 0 },
-  recovery: "average",
-  notes: "",
-  blocks: [],
-  theme: "light",
-});
-
-const asNumber = (v) => (v === "" || v === null || v === undefined ? 0 : Number(v));
-const totalLoad = (set) => {
-  const kg = asNumber(set.kg);
-  const kge = asNumber(set.kg_each);
-  return kg > 0 ? kg : (kge > 0 ? kge * 2 : 0);
+const makeSet = (over={}) => ({ kg:"", kg_each:"", reps:"", tags:[], notes:"", ...over });
+const asNumber = v => (v===""||v==null?0:Number(v));
+const totalLoad = s => {
+  const kg = asNumber(s.kg);
+  const kge = asNumber(s.kg_each);
+  return kg>0?kg:(kge>0?kge*2:0);
 };
-const perfScore = (set) => totalLoad(set) * asNumber(set.reps);
+const perfScore = s => totalLoad(s)*asNumber(s.reps);
 
-// ---- PR cache ----
-const loadPR = () => { try { const j = localStorage.getItem(PR_CACHE_KEY); return j ? JSON.parse(j) : {}; } catch { return {}; } };
-const savePR = (c) => { try { localStorage.setItem(PR_CACHE_KEY, JSON.stringify(c)); } catch {} };
-const exKey = (ex) => `${ex.name}__${ex.variant||''}__${ex.equipment||''}`;
+const loadPR = () => { try{ const j=localStorage.getItem(PR_CACHE_KEY); return j?JSON.parse(j):{} } catch { return {} } };
+const savePR = (c) => { try{ localStorage.setItem(PR_CACHE_KEY, JSON.stringify(c)) } catch{} };
+const exKey = ex => `${ex.name}__${ex.variant||''}__${ex.equipment||''}`;
 
-// ---- CSV / IO ----
 const toCSV = (session) => {
-  const rows = [];
+  const rows=[];
   rows.push(["date","week","workout","bodyweight","start","shoulder_pain","recovery"].join(","));
   rows.push([session.date,session.week,session.workout,session.bodyweight,session.session_start_time,session.pain?.shoulder ?? 0,session.recovery].join(","));
   rows.push("");
   rows.push(["block","exercise","variant","equipment","set","kg","kg_each","reps","tags","notes"].join(","));
-  (session.blocks || []).forEach((b) => {
-    (b.exercises || []).forEach((ex) => {
-      const baseTags = [];
-      if (ex.hand_each) baseTags.push("hand-each");
-      (ex.sets?.length ? ex.sets : [makeSet()]).forEach((s, idx) => {
-        const tags = [...(s.tags||[]), ...baseTags].filter(Boolean).join("|");
-        rows.push([b.name, ex.name, ex.variant || "", ex.equipment || "", idx + 1, s.kg || "", s.kg_each || "", s.reps || "", tags, (s.notes || ex.notes || "").replaceAll(",",";")].join(","));
+  (session.blocks||[]).forEach(b=>{
+    (b.exercises||[]).forEach(ex=>{
+      const baseTags=[]; if (ex.hand_each) baseTags.push("hand-each");
+      (ex.sets?.length?ex.sets:[makeSet()]).forEach((s,idx)=>{
+        const tags=[...(s.tags||[]),...baseTags].filter(Boolean).join("|");
+        rows.push([b.name, ex.name, ex.variant||"", ex.equipment||"", idx+1, s.kg||"", s.kg_each||"", s.reps||"", tags, (s.notes||ex.notes||"").replaceAll(",",";")].join(","));
       });
     });
   });
   return rows.join("\n");
 };
 
-const download = (filename, text, mime = "text/plain") => {
-  const blob = new Blob([text], { type: mime });
+const download = (filename, text, mime="text/plain")=>{
+  const blob = new Blob([text], {type:mime});
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 };
 
-// ---- Exercise Templates ----
-// W1 (Chest/Delts/Bis)
-const smithIncline = () => ({ name: "Incline Press", variant: "Smith Incline", equipment: "smith", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()], notes: "2s stretch pause first rep; hips down" });
-const dbHighIncline = () => ({ name: "Incline Press", variant: "DB High‑Incline", equipment: "bowflex", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()], notes: "Pause in the stretch; control wobble" });
-const lateralRaise = () => ({ name: "Lateral Raise", equipment: "dumbbell", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()] });
-const lyingCurlRope = () => ({ name: "Lying Cable Curl (rope)", equipment: "cable", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()] });
-const sitCableFly = () => ({ name: "Sitting Cable Fly", equipment: "cable", sets: [makeSet(), makeSet(), makeSet()] });
-const sitCableCurlBehind = () => ({ name: "Sitting Cable Curl (behind body)", equipment: "cable", sets: [makeSet(), makeSet(), makeSet()], hand_each: true });
-const arnoldPress = () => ({ name: "Arnold Press", equipment: "bowflex", sets: [makeSet(), makeSet(), makeSet()] });
-const dumbbellCurl = () => ({ name: "Dumbbell Curl", equipment: "dumbbell", sets: [makeSet(), makeSet(), makeSet()], hand_each: true });
+// ---------- Exercise templates (trimmed to match your spec) ----------
+const smithIncline = () => ({ name:"Incline Press", variant:"Smith Incline", equipment:"smith", sets:[...Array(5)].map(()=>makeSet()), notes:"2s stretch pause first rep; hips down" });
+const dbHighIncline = () => ({ name:"Incline Press", variant:"DB High-Incline", equipment:"dumbbell", sets:[...Array(5)].map(()=>makeSet()), notes:"Pause in the stretch; control wobble" });
+const lateralRaise = () => ({ name:"Lateral Raise", equipment:"dumbbell", sets:[...Array(5)].map(()=>makeSet()) });
+const lyingCurlRope = () => ({ name:"Lying Cable Curl (rope)", equipment:"cable", sets:[...Array(5)].map(()=>makeSet()) });
+const sitCableFly = () => ({ name:"Sitting Cable Fly", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
+const sitCableCurlBehind = () => ({ name:"Sitting Cable Curl (behind body)", equipment:"cable", hand_each:true, sets:[...Array(3)].map(()=>makeSet()) });
+const arnoldPress = () => ({ name:"Arnold Press", equipment:"dumbbell", sets:[...Array(3)].map(()=>makeSet()) });
+const dumbbellCurl = () => ({ name:"Dumbbell Curl", equipment:"dumbbell", hand_each:true, sets:[...Array(3)].map(()=>makeSet()) });
 
-const lyingCurlCurlbar = () => ({ name: "Lying Cable Curl (curl bar)", equipment: "cable", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()] });
-const aroundTheWorldRaise = () => ({ name: "Around‑the‑World DB Raise", equipment: "dumbbell", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()] });
+const lyingCurlCurlbar = () => ({ name:"Lying Cable Curl (curl bar)", equipment:"cable", sets:[...Array(5)].map(()=>makeSet()) });
+const aroundTheWorldRaise = () => ({ name:"Around-the-World DB Raise", equipment:"dumbbell", sets:[...Array(5)].map(()=>makeSet()) });
 
-// W2 (Back/Tris/Core)
-const latPulldown = () => ({ name: "Lat Pulldown", equipment: "cable", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()] });
-const triOHStandingCurlbar = () => ({ name: "Triceps OH Extension (curl bar, standing)", equipment: "cable", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()] });
-const hangingLegRaise = () => ({ name: "Hanging Leg Raise", equipment: "free", sets: [makeSet({reps:""}), makeSet({reps:""}), makeSet({reps:""}), makeSet({reps:""}), makeSet({reps:""})] });
-const tBarRowClose = () => ({ name: "T‑Bar Row (close grip)", equipment: "tbar", sets: [makeSet(), makeSet(), makeSet()] });
-const lyingTriExtIncline = () => ({ name: "Lying Triceps Ext (incline, curl bar)", equipment: "cable", sets: [makeSet(), makeSet(), makeSet()] });
-const deathmarchTriExt = () => ({ name: "Lying Triceps Ext (Deathmarch)", variant: "drops to 20kg", equipment: "cable", sets: [makeSet(), makeSet(), makeSet(), makeSet()], notes: "mark dropset in tags if used" });
+const latPulldown = () => ({ name:"Lat Pulldown", equipment:"cable", sets:[...Array(5)].map(()=>makeSet()) });
+const triOHStandingCurlbar = () => ({ name:"Triceps OH Extension (curl bar, standing)", equipment:"cable", sets:[...Array(5)].map(()=>makeSet()) });
+const hangingLegRaise = () => ({ name:"Hanging Leg Raise", equipment:"free", sets:[...Array(5)].map(()=>makeSet({reps:""})) });
+const tBarRowClose = () => ({ name:"T-Bar Row (close grip)", equipment:"tbar", sets:[...Array(3)].map(()=>makeSet()) });
+const lyingTriExtIncline = () => ({ name:"Lying Triceps Ext (incline, curl bar)", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
+const deathmarchTriExt = () => ({ name:"Lying Triceps Ext (Deathmarch)", variant:"drops to 20kg", equipment:"cable", sets:[...Array(4)].map(()=>makeSet()), notes:"mark dropset in tags if used" });
 
-// W3 (Paused Flat day)
-const smithPausedFlat = () => ({ name: "Bench Press", variant: "Paused Flat (Smith)", equipment: "smith", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()] });
-const dbFlatOrDecline = () => ({ name: "Bench Press", variant: "DB Flat/Decline", equipment: "bowflex", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()] });
-const standingCableFly = () => ({ name: "Standing Cable Fly", equipment: "cable", sets: [makeSet(), makeSet(), makeSet()] });
-const standingCableCurlBehind = () => ({ name: "Standing Cable Curl (behind body)", equipment: "cable", sets: [makeSet(), makeSet(), makeSet()], hand_each: true });
-const standingMilitaryCurlBar = () => ({ name: "Standing Military Press (curl bar)", equipment: "free", sets: [makeSet(), makeSet(), makeSet()] });
-const curlBarBiceps = () => ({ name: "Biceps Curl (curl bar)", equipment: "free", sets: [makeSet(), makeSet(), makeSet()] });
+const smithPausedFlat = () => ({ name:"Bench Press", variant:"Paused Flat (Smith)", equipment:"smith", sets:[...Array(5)].map(()=>makeSet()) });
+const dbFlatOrDecline = () => ({ name:"Bench Press", variant:"DB Flat/Decline", equipment:"dumbbell", sets:[...Array(5)].map(()=>makeSet()) });
+const standingCableFly = () => ({ name:"Standing Cable Fly", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
+const standingCableCurlBehind = () => ({ name:"Standing Cable Curl (behind body)", equipment:"cable", hand_each:true, sets:[...Array(3)].map(()=>makeSet()) });
+const standingMilitaryCurlBar = () => ({ name:"Standing Military Press (curl bar)", equipment:"free", sets:[...Array(3)].map(()=>makeSet()) });
+const curlBarBiceps = () => ({ name:"Biceps Curl (curl bar)", equipment:"free", sets:[...Array(3)].map(()=>makeSet()) });
 
-// W4 (Back/Tris/Core 2)
-const oneArmPulldown = () => ({ name: "1‑Arm Lat Pulldown (supinated→pronated)", equipment: "cable", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()], hand_each: true });
-const skullcrusher = () => ({ name: "Skullcrusher (EZ/curl bar)", equipment: "cable", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()] });
-const closeGripBenchLite = () => ({ name: "Close‑Grip Bench (same bar)", equipment: "cable", sets: [makeSet(), makeSet(), makeSet(), makeSet(), makeSet()] });
-const benchLegRaises = () => ({ name: "Bench Leg Raises (negatives)", equipment: "free", sets: [makeSet({reps:""}), makeSet({reps:""}), makeSet({reps:""}), makeSet({reps:""})] });
-const dragonCrunch = () => ({ name: "Dragon Crunch", equipment: "free", sets: [makeSet({reps:""})] });
-const wideGripLatRow = () => ({ name: "Wide‑Grip Lat Row", equipment: "cable", sets: [makeSet(), makeSet(), makeSet()] });
-const inclineRopeTriPush = () => ({ name: "Incline Rope Triceps Pushdown", equipment: "cable", sets: [makeSet(), makeSet(), makeSet()] });
-const facePulls = () => ({ name: "Kneeling Rope Face Pull", equipment: "cable", sets: [makeSet(), makeSet(), makeSet()] });
-const standingRopeCurl = () => ({ name: "Standing Rope Curl", equipment: "cable", sets: [makeSet(), makeSet(), makeSet()] });
+const oneArmPulldown = () => ({ name:"1-Arm Lat Pulldown (supinated→pronated)", equipment:"cable", hand_each:true, sets:[...Array(5)].map(()=>makeSet()) });
+const skullcrusher = () => ({ name:"Skullcrusher (EZ/curl bar)", equipment:"cable", sets:[...Array(5)].map(()=>makeSet()) });
+const closeGripBenchLite = () => ({ name:"Close-Grip Bench (same bar)", equipment:"cable", sets:[...Array(5)].map(()=>makeSet()) });
+const benchLegRaises = () => ({ name:"Bench Leg Raises (negatives)", equipment:"free", sets:[...Array(4)].map(()=>makeSet({reps:""})) });
+const dragonCrunch = () => ({ name:"Dragon Crunch", equipment:"free", sets:[makeSet({reps:""})] });
+const wideGripLatRow = () => ({ name:"Wide-Grip Lat Row", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
+const inclineRopeTriPush = () => ({ name:"Incline Rope Triceps Pushdown", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
+const facePulls = () => ({ name:"Kneeling Rope Face Pull", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
+const standingRopeCurl = () => ({ name:"Standing Rope Curl", equipment:"cable", sets:[...Array(3)].map(()=>makeSet()) });
 
-// ---- Defaults per workout ----
 const blocksW1 = () => ([
-  { name: "Superset 1", exercises: [ smithIncline(), lateralRaise(), lyingCurlRope() ] },
-  { name: "Superset 2", exercises: [ sitCableFly(), sitCableCurlBehind(), arnoldPress() ] },
-  { name: "Additional", exercises: [ dumbbellCurl() ] },
+  { name:"Superset 1", exercises:[ smithIncline(), lateralRaise(), lyingCurlRope() ] },
+  { name:"Superset 2", exercises:[ sitCableFly(), sitCableCurlBehind(), arnoldPress() ] },
+  { name:"Additional", exercises:[ dumbbellCurl() ] },
 ]);
-
 const blocksW2 = () => ([
-  { name: "Superset 1", exercises: [ latPulldown(), triOHStandingCurlbar(), hangingLegRaise() ] },
-  { name: "Superset 2", exercises: [ tBarRowClose(), lyingTriExtIncline() ] },
-  { name: "Additional", exercises: [ deathmarchTriExt() ] },
-  { name: "Leg Module (optional)", exercises: [] },
+  { name:"Superset 1", exercises:[ latPulldown(), triOHStandingCurlbar(), hangingLegRaise() ] },
+  { name:"Superset 2", exercises:[ tBarRowClose(), lyingTriExtIncline() ] },
+  { name:"Additional", exercises:[ deathmarchTriExt() ] },
+  { name:"Leg Module (optional)", exercises:[] },
 ]);
-
 const blocksW3 = () => ([
-  { name: "Superset 1", exercises: [ smithPausedFlat(), aroundTheWorldRaise(), lyingCurlCurlbar() ] },
-  { name: "Superset 2", exercises: [ standingCableFly(), standingCableCurlBehind(), standingMilitaryCurlBar() ] },
-  { name: "Additional", exercises: [ curlBarBiceps() ] },
-  { name: "Leg Module (optional)", exercises: [] },
+  { name:"Superset 1", exercises:[ smithPausedFlat(), aroundTheWorldRaise(), lyingCurlCurlbar() ] },
+  { name:"Superset 2", exercises:[ standingCableFly(), standingCableCurlBehind(), standingMilitaryCurlBar() ] },
+  { name:"Additional", exercises:[ curlBarBiceps() ] },
+  { name:"Leg Module (optional)", exercises:[] },
 ]);
-
 const blocksW4 = () => ([
-  { name: "Superset 1", exercises: [ oneArmPulldown(), skullcrusher(), closeGripBenchLite(), benchLegRaises(), dragonCrunch() ] },
-  { name: "Superset 2", exercises: [ wideGripLatRow(), inclineRopeTriPush() ] },
-  { name: "Additional", exercises: [ facePulls(), standingRopeCurl() ] },
-  { name: "Leg Module (optional)", exercises: [] },
+  { name:"Superset 1", exercises:[ oneArmPulldown(), skullcrusher(), closeGripBenchLite(), benchLegRaises(), dragonCrunch() ] },
+  { name:"Superset 2", exercises:[ wideGripLatRow(), inclineRopeTriPush() ] },
+  { name:"Additional", exercises:[ facePulls(), standingRopeCurl() ] },
+  { name:"Leg Module (optional)", exercises:[] },
 ]);
-
-const defaultBlocksForWorkout = (wNum) => {
-  switch (Number(wNum)) {
-    case 1: return blocksW1();
-    case 2: return blocksW2();
-    case 3: return blocksW3();
-    case 4: return blocksW4();
-    default: return blocksW1();
-  }
+const defaultBlocksForWorkout = (w) => {
+  switch(Number(w)){ case 1: return blocksW1(); case 2: return blocksW2(); case 3: return blocksW3(); case 4: return blocksW4(); default: return blocksW1(); }
 };
 
-// ---- Exercise Card ----
+// ---------- Components ----------
 function ExerciseCard({ blockIdx, exIdx, ex, session, setSession, updateField, addSet, removeLastSet, bestPR }) {
-  const [showTags, setShowTags] = useState(false);
-  const isDB = (ex.equipment === 'bowflex' || ex.equipment === 'dumbbell');
+  const [showTags,setShowTags] = React.useState(false);
+  const isDB = (ex.equipment==="dumbbell");
   const bestAllTime = bestPR || 0;
-  return (
-    <Card className="mt-3">
-      <CardContent className="card-surface p-4">
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="font-medium truncate max-w-[75vw] md:max-w-none">
-              {ex.name} {ex.variant ? <span className="text-muted-foreground">— {ex.variant}</span> : null}
-            </div>
-            {/* equipment hidden in UI */}
-          </div>
-          {/* Hand‑each toggle (if supported) */}
-          {ex.hand_each !== undefined && (
-            <label className="text-xs inline-flex items-center gap-2">
-              <span>Hand each</span>
-              <Switch checked={!!ex.hand_each} onCheckedChange={(v)=>{
-                setSession(prev=>{
-                  const s = JSON.parse(JSON.stringify(prev));
-                  s.blocks[blockIdx].exercises[exIdx].hand_each = v; return s;
-                });
-              }}/>
-            </label>
-          )}
-        </div>
 
-        <div className="mt-3 grid grid-cols-1 md:grid-cols-12 gap-2">
-          {ex.sets?.map((s, i) => {
-            const score = perfScore(s);
-            const isPR = score > 0 && score >= bestAllTime && bestAllTime > 0;
-            return (
-            <div key={i} className="md:col-span-12 grid grid-cols-12 gap-2 items-end p-3 rounded-xl border set-surface">
-              <div className="col-span-3">
-                <Label className="text-xs">{isDB ? 'kg (each)' : 'kg'}</Label>
-                {isDB ? (
-                  <Input placeholder="kg each" value={s.kg_each} onChange={(e)=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.kg_each`, e.target.value)} />
-                ) : (
-                  <Input placeholder="kg" value={s.kg} onChange={(e)=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.kg`, e.target.value)} />
-                )}
+  return (
+    <div className="card" style={{marginTop:12}}>
+      <div className="title-row">
+        <div>
+          <div style={{fontWeight:600}}>{ex.name} {ex.variant ? <span className="muted">— {ex.variant}</span> : null}</div>
+          {/* equipment hidden */}
+        </div>
+        {typeof ex.hand_each !== "undefined" && (
+          <label className="muted" style={{display:"inline-flex",alignItems:"center",gap:8}}>
+            <span>Hand each</span>
+            <input type="checkbox" checked={!!ex.hand_each} onChange={(e)=>{
+              setSession(prev=>{
+                const s=JSON.parse(JSON.stringify(prev));
+                s.blocks[blockIdx].exercises[exIdx].hand_each = e.target.checked; return s;
+              });
+            }}/>
+          </label>
+        )}
+      </div>
+
+      <div style={{marginTop:12}} className="grid">
+        {(ex.sets||[]).map((s,i)=>{
+          const score = perfScore(s);
+          const isPR = score>0 && bestAllTime>0 && score>=bestAllTime;
+          return (
+            <div className="set grid" key={i} style={{gridTemplateColumns:"1fr 3fr"}}>
+              <div>
+                <label>{isDB ? "kg (each)":"kg"}</label>
+                <input placeholder={isDB?"kg each":"kg"} value={isDB? (s.kg_each||"") : (s.kg||"")}
+                       onChange={e=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.${isDB?"kg_each":"kg"}`, e.target.value)} />
               </div>
-              <div className="col-span-9 grid grid-cols-12 gap-2">
-                <div className="col-span-3">
-                  <Label className="text-xs">Reps</Label>
-                  <Input placeholder="reps" value={s.reps} onChange={(e)=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.reps`, e.target.value)} />
+              <div className="grid" style={{gridTemplateColumns:"1fr 3fr", gap:10}}>
+                <div>
+                  <label>Reps</label>
+                  <input placeholder="reps" value={s.reps||""} onChange={e=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.reps`, e.target.value)} />
                 </div>
-                <div className="col-span-9">
-                  <Label className="text-xs">Notes (set)</Label>
-                  <Input placeholder="tempo / ROM / cues" value={s.notes||""} onChange={(e)=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.notes`, e.target.value)} />
+                <div>
+                  <label>Notes (set)</label>
+                  <input placeholder="tempo / ROM / cues" value={s.notes||""} onChange={e=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.notes`, e.target.value)} />
                 </div>
               </div>
-              <div className="col-span-12 text-xs text-muted-foreground">
-                PR score (W×R): {score} {isPR && <span className="ml-2 inline-block px-2 py-0.5 rounded bg-green-600 text-white">All‑time PR ✅</span>} <span className="ml-2 text-[11px]">(Best: {bestAllTime})</span>
+              <div className="muted" style={{gridColumn:"1 / -1"}}>
+                PR score (W×R): {score}
+                {isPR && <span className="pr">All-time PR ✓</span>}
+                <span style={{marginLeft:8,fontSize:11}}>(Best: {bestAllTime})</span>
               </div>
               {showTags && (
-                <div className="col-span-12">
-                  <Label className="text-xs">Tags</Label>
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {["pause","myo","ROM-reduced","tempo-slow","tempo-2s-stretch","dropset","deathmarch"].map(tag => (
-                      <Badge key={tag} onClick={()=> {
-                        const current = new Set(s.tags || []);
-                        current.has(tag) ? current.delete(tag) : current.add(tag);
-                        updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.tags`, Array.from(current));
-                      }} className={`cursor-pointer ${s.tags?.includes(tag) ? 'bg-primary text-primary-foreground' : 'bg-secondary'}`}>{tag}</Badge>
-                    ))}
+                <div style={{gridColumn:"1 / -1"}}>
+                  <label>Tags</label>
+                  <div className="row" style={{gap:6,marginTop:6}}>
+                    {["pause","myo","ROM-reduced","tempo-slow","tempo-2s-stretch","dropset","deathmarch"].map(tag=>{
+                      const active = (s.tags||[]).includes(tag);
+                      return (
+                        <span key={tag} className={`badge ${active?"active":""}`} onClick={()=>{
+                          const cur = new Set(s.tags||[]);
+                          cur.has(tag)?cur.delete(tag):cur.add(tag);
+                          updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.tags`, Array.from(cur));
+                        }}>{tag}</span>
+                      );
+                    })}
                   </div>
                 </div>
               )}
             </div>
-          );})}
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" onClick={()=> setShowTags(v=>!v)}>{showTags ? 'Hide tags' : 'Show tags'}</Button>
-          <Button size="sm" variant="outline" onClick={()=> addSet(blockIdx, exIdx)}>+ Add set</Button>
-          <Button size="sm" variant="outline" onClick={()=> removeLastSet(blockIdx, exIdx)}>Remove last</Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ---- App ----
-export default function App() {
-  const [session, setSession] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) { try { return JSON.parse(saved); } catch {} }
-    const st = DEFAULT_STATE();
-    st.blocks = defaultBlocksForWorkout(1);
-    return st;
-  });
-  const [prCache, setPrCache] = useState(loadPR());
-
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(session)); }, [session]);
-  useEffect(() => {
-    const next = { ...prCache };
-    (session.blocks || []).forEach((b) => (b.exercises||[]).forEach((ex) => {
-      const key = exKey(ex);
-      const best = (ex.sets||[]).reduce((m, s) => Math.max(m, perfScore(s)), 0);
-      if (best > (next[key] || 0)) next[key] = best;
-    }));
-    if (JSON.stringify(next) !== JSON.stringify(prCache)) { setPrCache(next); savePR(next); }
-  }, [session]);
-
-  const onWorkoutChange = (w) => setSession((prev) => ({ ...prev, workout: Number(w), blocks: defaultBlocksForWorkout(Number(w)) }));
-
-  const updateField = (path, value) => {
-    setSession((prev) => {
-      const st = JSON.parse(JSON.stringify(prev));
-      const segs = path.split("."); let obj = st;
-      for (let i = 0; i < segs.length - 1; i++) obj = obj[segs[i]];
-      obj[segs[segs.length - 1]] = value; return st;
-    });
-  };
-  const addSet = (bIdx, eIdx) => setSession((prev) => { const st = JSON.parse(JSON.stringify(prev)); st.blocks[bIdx].exercises[eIdx].sets.push(makeSet()); return st; });
-  const removeLastSet = (bIdx, eIdx) => setSession((prev) => { const st = JSON.parse(JSON.stringify(prev)); st.blocks[bIdx].exercises[eIdx].sets.pop(); return st; });
-
-  const visibleBlocks = useMemo(() => {
-    let b = JSON.parse(JSON.stringify(session.blocks || []));
-    if (!session.toggles.has_time_for_finishers) {
-      b = b.filter((blk) => blk.name !== 'Additional');
-    }
-    return b;
-  }, [session.blocks, session.toggles.has_time_for_finishers]);
-
-  return (
-    <div className={`${session.theme === 'dark' ? 'dark-theme bg-neutral-950 text-neutral-50' : 'light-theme bg-slate-50 text-neutral-900'} min-h-screen p-4 max-w-5xl mx-auto space-y-2`}>
-      {/* Stronger theme surfaces */}
-      {session.theme === 'light' ? (
-        <style>{`
-          .light-theme .card-surface { background:#ffffff; border-color:#e5e7eb; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
-          .light-theme input, .light-theme textarea { background:#ffffff; }
-          .light-theme .set-surface { background:#f3f4f6; border-color:#e5e7eb; }
-        `}</style>
-      ) : (
-        <style>{`
-          .dark-theme .card-surface { background:#111418; border-color:#23262b; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }
-          .dark-theme input, .dark-theme textarea { background:#0b0e12; color:#fff; }
-          .dark-theme .set-surface { background:#141821; border-color:#23262b; }
-        `}</style>
-      )}
-
-      {/* Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-end justify-between">
-        <div className="flex items-center gap-3">
-          <Dumbbell className="w-6 h-6" />
-          <h1 className="text-xl font-semibold">Hypertrophy Tracker — v2.4.2</h1>
-        </div>
-        <div className="flex gap-2 items-center">
-          <Button size="sm" variant="secondary" onClick={()=> download(`workout-${session.date}.csv`, toCSV(session), 'text/csv')}><Download className="w-4 h-4 mr-2"/>CSV</Button>
-          <Button size="sm" variant="secondary" onClick={()=> download(`workout-${session.date}.json`, JSON.stringify(session, null, 2), 'application/json')}><Download className="w-4 h-4 mr-2"/>JSON</Button>
-          <label className="inline-flex items-center gap-2 text-sm px-3 py-2 border rounded-md cursor-pointer">
-            <Upload className="w-4 h-4"/>
-            Import JSON
-            <input type="file" accept="application/json" className="hidden" onChange={(e)=> e.target.files?.[0] && ((()=>{const r=new FileReader(); r.onload=(ev)=>{try{setSession(JSON.parse(ev.target.result))}catch{alert('Invalid JSON')}}; r.readAsText(e.target.files[0]);})())} />
-          </label>
-          <Button size="sm" variant="destructive" onClick={()=>{ if(!confirm('Reset current session?')) return; const st=DEFAULT_STATE(); st.blocks = defaultBlocksForWorkout(1); setSession(st); }}><Trash2 className="w-4 h-4 mr-2"/>Reset</Button>
-          <Button size="icon" variant="ghost" onClick={()=> setSession(prev=> ({...prev, theme: prev.theme==='dark'?'light':'dark'}))}>{session.theme === 'dark' ? <Sun className="w-4 h-4"/> : <Moon className="w-4 h-4"/>}</Button>
-        </div>
+          );
+        })}
       </div>
 
-      {/* Session Meta */}
-      <Card className="mt-4"><CardContent className="card-surface p-4 grid md:grid-cols-4 gap-4">
-        <div>
-          <Label>Week</Label>
-          <Select value={String(session.week)} onValueChange={(v)=>setSession(prev=>({...prev, week:Number(v)}))}>
-            <SelectTrigger className="w-full"><SelectValue placeholder="Week"/></SelectTrigger>
-            <SelectContent>{[1,2,3,4,5,6].map(w=> <SelectItem key={w} value={String(w)}>{w}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Workout</Label>
-          <Select value={String(session.workout)} onValueChange={onWorkoutChange}>
-            <SelectTrigger className="w-full"><SelectValue placeholder="Workout"/></SelectTrigger>
-            <SelectContent>{[1,2,3,4].map(w=> <SelectItem key={w} value={String(w)}>{`W${w}`}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Bodyweight (kg)</Label>
-          <Input value={session.bodyweight} onChange={(e)=>setSession(prev=>({...prev, bodyweight: e.target.value}))} placeholder="88.9"/>
-        </div>
-        <div>
-          <Label>Start time</Label>
-          <Input type="time" value={session.session_start_time} onChange={(e)=>setSession(prev=>({...prev, session_start_time: e.target.value}))} />
-        </div>
-
-        {/* Chest Alternate (W1/W3 only) */}
-        {(session.workout===1 || session.workout===3) && (
-          <div className="md:col-span-4 p-3 border rounded-xl card-surface flex items-center justify-between">
-            <div>
-              <div className="font-medium">Chest Alternate</div>
-              <div className="text-xs text-muted-foreground">{session.workout===1 ? 'Smith Incline ↔ DB High‑Incline' : 'Paused Flat (Smith) ↔ DB Flat/Decline'}</div>
-            </div>
-            <Select onValueChange={(v)=>{
-              setSession(prev=>{
-                const s=JSON.parse(JSON.stringify(prev));
-                const sup1=s.blocks[0];
-                const idx=sup1.exercises.findIndex((e)=> e.name==='Incline Press' || e.name==='Bench Press');
-                if (idx===-1) return s;
-                if (s.workout===1) sup1.exercises[idx] = (v==='smith') ? smithIncline() : dbHighIncline();
-                if (s.workout===3) sup1.exercises[idx] = (v==='smith') ? smithPausedFlat() : dbFlatOrDecline();
-                return s;
-              });
-            }}>
-              <SelectTrigger className="w-48"><SelectValue placeholder="Switch variant"/></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="smith">{session.workout===1 ? 'Smith Incline' : 'Paused Flat (Smith)'}</SelectItem>
-                <SelectItem value="db">{session.workout===1 ? 'DB High‑Incline' : 'DB Flat/Decline'}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-      {/* Finishers toggle */}
-        <div className="md:col-span-4 p-3 border rounded-xl card-surface flex items-center justify-between">
-          <div>
-            <div className="font-medium">Finishers visible</div>
-            <div className="text-xs text-muted-foreground">Show/hide the Additional block</div>
-          </div>
-          <Switch checked={session.toggles.has_time_for_finishers} onCheckedChange={(v)=> setSession(prev=>({...prev, toggles:{...prev.toggles, has_time_for_finishers:v}}))}/>
-        </div>
-
-        {/* Leg Module quick add (W2/W3/W4) */}
-        {session.workout!==1 && (
-          <div className="md:col-span-4 p-3 border rounded-xl card-surface">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <div className="font-medium">Leg Module</div>
-                <div className="text-xs text-muted-foreground">Add one pattern</div>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button size="sm" variant="outline" onClick={()=>{
-                setSession(prev=>{ const s=JSON.parse(JSON.stringify(prev)); const b=s.blocks.find((x)=>x.name.startsWith('Leg Module')); if(!b) return s; b.exercises=[{ name: 'Leg Curl (ankle cuff + curl bar)', equipment:'cable', sets:[makeSet(),makeSet(),makeSet()], notes:'stabilize hips; cuff tight' }]; return s;});
-              }}>Leg Curl</Button>
-              <Button size="sm" variant="outline" onClick={()=>{
-                setSession(prev=>{ const s=JSON.parse(JSON.stringify(prev)); const b=s.blocks.find((x)=>x.name.startsWith('Leg Module')); if(!b) return s; b.exercises=[{ name: 'Leg Extension (ankle cuff, cable)', equipment:'cable', sets:[makeSet(),makeSet(),makeSet()], notes:'slow eccentrics' }]; return s;});
-              }}>Leg Ext</Button>
-              <Button size="sm" variant="outline" onClick={()=>{
-                setSession(prev=>{ const s=JSON.parse(JSON.stringify(prev)); const b=s.blocks.find((x)=>x.name.startsWith('Leg Module')); if(!b) return s; b.exercises=[{ name: 'RDL (Bowflex)', equipment:'bowflex', sets:[makeSet(),makeSet(),makeSet()] }]; return s;});
-              }}>Bowflex RDL</Button>
-              <Button size="sm" variant="outline" onClick={()=>{
-                setSession(prev=>{ const s=JSON.parse(JSON.stringify(prev)); const b=s.blocks.find((x)=>x.name.startsWith('Leg Module')); if(!b) return s; b.exercises=[{ name: 'Split Squat (DB)', equipment:'bowflex', sets:[makeSet(),makeSet(),makeSet()] }]; return s;});
-              }}>Split Squat</Button>
-              <Button className="col-span-2" size="sm" variant="ghost" onClick={()=>{
-                setSession(prev=>{ const s=JSON.parse(JSON.stringify(prev)); const b=s.blocks.find((x)=>x.name.startsWith('Leg Module')); if(!b) return s; b.exercises=[]; return s;});
-              }}>Remove</Button>
-            </div>
-          </div>
-        )}
-      </CardContent></Card>
-
-      {/* Blocks */}
-      <div className="mt-4 grid grid-cols-1 gap-6">
-        {useMemo(()=> visibleBlocks.map((b, bIdx) => (
-          <div key={bIdx}>
-            <h3 className="text-lg font-semibold mb-2">{b.name}</h3>
-            {(b.exercises || []).map((ex, exIdx) => (
-              <ExerciseCard key={exIdx} blockIdx={bIdx} exIdx={exIdx} ex={ex} session={session} setSession={setSession} updateField={updateField} addSet={addSet} removeLastSet={removeLastSet} bestPR={(loadPR()[exKey(ex)]||0)} />
-            ))}
-          </div>
-        )), [visibleBlocks, session])}
+      <div className="row" style={{marginTop:12}}>
+        <button className="button" onClick={()=>setShowTags(v=>!v)}>{showTags?"Hide tags":"Show tags"}</button>
+        <button className="button" onClick={()=> addSet(blockIdx,exIdx)}>+ Add set</button>
+        <button className="button" onClick={()=> removeLastSet(blockIdx,exIdx)}>Remove last</button>
       </div>
-
-      {/* Footer */}
-      <Card className="mt-4">
-        <CardContent className="card-surface p-4 grid gap-3">
-          <div>
-            <Label className="text-xs">Session notes</Label>
-            <Textarea rows={3} value={session.notes} onChange={(e)=> setSession(prev=>({...prev, notes: e.target.value}))} />
-          </div>
-          <div className="flex gap-2">
-            <Button onClick={()=> download(`workout-${session.date}.csv`, toCSV(session), 'text/csv')} variant="secondary"><Download className="w-4 h-4 mr-2"/>Export CSV</Button>
-            <Button onClick={()=> download(`workout-${session.date}.json`, JSON.stringify(session, null, 2), 'application/json')} variant="secondary"><Download className="w-4 h-4 mr-2"/>Export JSON</Button>
-            <div className="flex-1" />
-            <Button onClick={()=> alert('Autosaved to localStorage. Use Export for files.')}><Save className="w-4 h-4 mr-2"/>Save</Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="h-8" />
     </div>
   );
 }
+
+function App(){
+  const [session,setSession] = useState(()=>{
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved){ try{ return JSON.parse(saved) } catch{} }
+    const st = {
+      date: new Date().toISOString().slice(0,10),
+      week: 4, workout: 1, bodyweight: "", session_start_time: "",
+      toggles: { has_time_for_finishers: true },
+      pain:{shoulder:0}, recovery:"average", notes:"",
+      blocks: [], theme: "light"
+    };
+    st.blocks = defaultBlocksForWorkout(1);
+    return st;
+  });
+  const [prCache,setPrCache] = useState(loadPR());
+
+  useEffect(()=>{ localStorage.setItem(STORAGE_KEY, JSON.stringify(session)); },[session]);
+
+  useEffect(()=>{
+    const next = {...prCache};
+    (session.blocks||[]).forEach(b=>(b.exercises||[]).forEach(ex=>{
+      const key = exKey(ex);
+      const best = (ex.sets||[]).reduce((m,s)=> Math.max(m, perfScore(s)), 0);
+      if (best > (next[key]||0)) next[key] = best;
+    }));
+    if (JSON.stringify(next)!==JSON.stringify(prCache)){ setPrCache(next); savePR(next); }
+  },[session]);
+
+  const onWorkoutChange = (w)=> setSession(prev=> ({...prev, workout:Number(w), blocks: defaultBlocksForWorkout(Number(w))}));
+  const updateField = (path,value)=>{
+    setSession(prev=>{
+      const st = JSON.parse(JSON.stringify(prev));
+      const segs = path.split(".");
+      let obj = st; for (let i=0;i<segs.length-1;i++) obj = obj[segs[i]];
+      obj[segs[segs.length-1]] = value; return st;
+    });
+  };
+  const addSet = (bIdx,eIdx)=> setSession(prev=>{ const st=JSON.parse(JSON.stringify(prev)); st.blocks[bIdx].exercises[eIdx].sets.push(makeSet()); return st; });
+  const removeLastSet = (bIdx,eIdx)=> setSession(prev=>{ const st=JSON.parse(JSON.stringify(prev)); st.blocks[bIdx].exercises[eIdx].sets.pop(); return st; });
+
+  const visibleBlocks = useMemo(()=>{
+    let b = JSON.parse(JSON.stringify(session.blocks||[]));
+    if (!session.toggles.has_time_for_finishers){ b = b.filter(blk => blk.name !== "Additional"); }
+    return b;
+  },[session.blocks, session.toggles.has_time_for_finishers]);
+
+  const exportCSV = ()=> download(`workout-${session.date}.csv`, toCSV(session), "text/csv");
+  const exportJSON = ()=> download(`workout-${session.date}.json`, JSON.stringify(session,null,2), "application/json");
+  const importJSON = (file)=>{
+    const r = new FileReader();
+    r.onload = (ev)=>{ try{ setSession(JSON.parse(ev.target.result)) } catch{ alert("Invalid JSON") } };
+    r.readAsText(file);
+  };
+
+  const toggleTheme = ()=> setSession(prev=> ({...prev, theme: prev.theme==="dark"?"light":"dark"}));
+
+  // Chest Alternate handler (W1/W3)
+  const swapChest = (which)=>{
+    setSession(prev=>{
+      const s = JSON.parse(JSON.stringify(prev));
+      const sup1 = s.blocks[0];
+      const idx = sup1.exercises.findIndex(e => e.name==="Incline Press" || e.name==="Bench Press");
+      if (idx===-1) return s;
+      if (s.workout===1) sup1.exercises[idx] = (which==="smith") ? smithIncline() : dbHighIncline();
+      if (s.workout===3) sup1.exercises[idx] = (which==="smith") ? smithPausedFlat() : dbFlatOrDecline();
+      return s;
+    });
+  };
+
+  // Leg module quick add (W2/W3/W4)
+  const setLegModule = (kind)=>{
+    setSession(prev=>{
+      const s=JSON.parse(JSON.stringify(prev));
+      const b = s.blocks.find(x=>x.name.startsWith("Leg Module"));
+      if (!b) return s;
+      if (kind==="none"){ b.exercises = []; return s; }
+      if (kind==="curl"){ b.exercises=[{ name:"Leg Curl (ankle cuff + curl bar)", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"stabilize hips; cuff tight"}]; return s; }
+      if (kind==="ext"){ b.exercises=[{ name:"Leg Extension (ankle cuff, cable)", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"slow eccentrics"}]; return s; }
+      if (kind==="rdl"){ b.exercises=[{ name:"RDL (DB)", equipment:"dumbbell", sets:[makeSet(),makeSet(),makeSet()] }]; return s; }
+      if (kind==="split"){ b.exercises=[{ name:"Split Squat (DB)", equipment:"dumbbell", sets:[makeSet(),makeSet(),makeSet()] }]; return s; }
+      return s;
+    });
+  };
+
+  return (
+    <div className={session.theme==="dark"?"dark":""}>
+      <div className="container">
+        {/* Header */}
+        <div className="row" style={{justifyContent:"space-between"}}>
+          <h1>Hypertrophy Tracker — v2.4.2</h1>
+          <div className="row">
+            <button className="button" onClick={exportCSV}>CSV</button>
+            <button className="button" onClick={exportJSON}>JSON</button>
+            <label className="button" style={{display:"inline-flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+              Import JSON
+              <input type="file" accept="application/json" style={{display:"none"}}
+                     onChange={e=> e.target.files?.[0] && importJSON(e.target.files[0])}/>
+            </label>
+            <button className="button destructive" onClick={()=>{
+              if (!confirm("Reset current session?")) return;
+              const st = {
+                date:new Date().toISOString().slice(0,10),
+                week:4, workout:1, bodyweight:"", session_start_time:"",
+                toggles:{has_time_for_finishers:true}, pain:{shoulder:0}, recovery:"average",
+                notes:"", blocks: defaultBlocksForWorkout(1), theme: "light"
+              };
+              setSession(st);
+            }}>Reset</button>
+            <button className="button ghost" onClick={toggleTheme}>{session.theme==="dark"?"Light":"Dark"}</button>
+          </div>
+        </div>
+
+        {/* Session Meta */}
+        <div className="card" style={{marginTop:12}}>
+          <div className="grid grid-4">
+            <div>
+              <label>Week</label>
+              <select value={String(session.week)} onChange={e=> setSession(prev=>({...prev, week:Number(e.target.value)}))}>
+                {[1,2,3,4,5,6].map(w=> <option key={w} value={w}>{w}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>Workout</label>
+              <select value={String(session.workout)} onChange={e=> onWorkoutChange(e.target.value)}>
+                {[1,2,3,4].map(w=> <option key={w} value={w}>{`W${w}`}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>Bodyweight (kg)</label>
+              <input value={session.bodyweight} onChange={e=> setSession(prev=>({...prev, bodyweight:e.target.value}))} placeholder="88.9"/>
+            </div>
+            <div>
+              <label>Start time</label>
+              <input type="time" value={session.session_start_time} onChange={e=> setSession(prev=>({...prev, session_start_time:e.target.value}))}/>
+            </div>
+
+            {(session.workout===1 || session.workout===3) && (
+              <div className="card" style={{gridColumn:"1/-1"}}>
+                <div className="title-row">
+                  <div>
+                    <div style={{fontWeight:600}}>Chest Alternate</div>
+                    <div className="muted">{session.workout===1 ? "Smith Incline ↔ DB High-Incline" : "Paused Flat (Smith) ↔ DB Flat/Decline"}</div>
+                  </div>
+                  <select onChange={e=> swapChest(e.target.value)} defaultValue="">
+                    <option value="" disabled>Switch variant</option>
+                    <option value="smith">{session.workout===1 ? "Smith Incline" : "Paused Flat (Smith)"}</option>
+                    <option value="db">{session.workout===1 ? "DB High-Incline" : "DB Flat/Decline"}</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <div className="card" style={{gridColumn:"1/-1"}}>
+              <div className="title-row">
+                <div>
+                  <div style={{fontWeight:600}}>Finishers visible</div>
+                  <div className="muted">Show/hide the Additional block</div>
+                </div>
+                <input type="checkbox" checked={!!session.toggles.has_time_for_finishers}
+                       onChange={e=> setSession(prev=>({...prev, toggles:{...prev.toggles, has_time_for_finishers:e.target.checked}}))}/>
+              </div>
+            </div>
+
+            {session.workout!==1 && (
+              <div className="card" style={{gridColumn:"1/-1"}}>
+                <div className="title-row"><div><div style={{fontWeight:600}}>Leg Module</div><div className="muted">Add one pattern</div></div></div>
+                <div className="row" style={{gap:8,marginTop:6,flexWrap:"wrap"}}>
+                  <button className="button" onClick={()=>setLegModule("curl")}>Leg Curl</button>
+                  <button className="button" onClick={()=>setLegModule("ext")}>Leg Ext</button>
+                  <button className="button" onClick={()=>setLegModule("rdl")}>DB RDL</button>
+                  <button className="button" onClick={()=>setLegModule("split")}>Split Squat</button>
+                  <button className="button ghost" onClick={()=>setLegModule("none")} style="margin-left:auto">Remove</button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Blocks */}
+        <div style={{marginTop:16}} className="grid">
+          {useMemo(()=> (visibleBlocks||[]).map((b,bIdx)=>(
+            <div key={bIdx}>
+              <h3 style={{margin:"8px 0 6px",fontSize:18}}>{b.name}</h3>
+              {(b.exercises||[]).map((ex,exIdx)=>(
+                <ExerciseCard key={exIdx}
+                  blockIdx={bIdx} exIdx={exIdx} ex={ex}
+                  session={session} setSession={setSession}
+                  updateField={updateField} addSet={addSet} removeLastSet={removeLastSet}
+                  bestPR={(loadPR()[exKey(ex)]||0)}
+                />
+              ))}
+            </div>
+          )), [visibleBlocks, session])}
+        </div>
+
+        {/* Footer */}
+        <div className="card" style={{marginTop:16}}>
+          <div className="grid">
+            <div>
+              <label className="muted">Session notes</label>
+              <textarea rows="3" value={session.notes} onChange={e=> setSession(prev=>({...prev, notes:e.target.value}))}></textarea>
+            </div>
+            <div className="row">
+              <button className="button" onClick={exportCSV}>Export CSV</button>
+              <button className="button" onClick={exportJSON}>Export JSON</button>
+              <div className="spacer"></div>
+              <button className="button" onClick={()=> alert("Autosaved to localStorage. Use Export for files.")}>Save</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
+
