@@ -29,7 +29,9 @@
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root" style="padding:16px">
+  Loading TrainingApp...
+</div>
 <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -258,7 +260,14 @@ function App(){
     alert("Session added to local history. Export JSON too, because browsers are goblins.");
   };
 
-  const visibleBlockPairs = useMemo(()=> (session.blocks||[]).map((b,idx)=>({b,idx})).filter(({b})=> session.toggles.has_time_for_finishers || b.name!=="Additional"),[session.blocks,session.toggles.has_time_for_finishers]);
+  const hasFinishers = session.toggles?.has_time_for_finishers ?? true;
+
+const visibleBlockPairs = useMemo(
+  () => (session.blocks || [])
+    .map((b, idx) => ({ b, idx }))
+    .filter(({ b }) => hasFinishers || b.name !== "Additional"),
+  [session.blocks, hasFinishers]
+);
 
   const swapChest = (which)=> setSession(prev=>{
     const s=clone(prev); const sup1=s.blocks[0]; const idx=sup1.exercises.findIndex(e=>e.name==="Incline Press"||e.name==="Bench Press"); if(idx===-1)return s;
