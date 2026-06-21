@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Hypertrophy Tracker — v3.0.1</title>
+<meta name="theme-color" content="#0b0e12">
+<style>
+  :root{
+    --bg:#f8fafc; --fg:#0b0f19; --card:#ffffff; --muted:#6b7280; --border:#e5e7eb; --set:#f3f4f6;
+    --good:#16a34a; --warn:#f59e0b; --bad:#dc2626; --blue:#2563eb;
+  }
+  .dark{--bg:#0b0e12; --fg:#e5e7eb; --card:#111418; --muted:#98a2b3; --border:#23262b; --set:#141821}
+  *{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial}
+  html,body{height:100%} body{margin:0;background:var(--bg);color:var(--fg)}
+  .container{max-width:clamp(320px,94vw,860px);margin:0 auto;padding:16px 16px 72px}
+  h1{font-size:22px;margin:0}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.spacer{flex:1}
+  .button{border:1px solid var(--border);background:var(--card);color:var(--fg);padding:12px 14px;border-radius:12px;cursor:pointer;min-height:44px}
+  .button.ghost{background:transparent}.button.destructive{background:#7f1d1d;color:#fff;border-color:#7f1d1d}.button.primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px}.muted{color:var(--muted);font-size:12px}
+  input,select,textarea{width:100%;border:1px solid var(--border);border-radius:12px;background:var(--card);color:var(--fg);padding:12px 14px;min-height:48px;font-size:16px}
+  textarea{min-height:52px}.dark input,.dark select,.dark textarea{color:#fff;background:#0e1116;border-color:#2a2f37}::placeholder{color:var(--muted)}
+  .grid{display:grid;gap:12px}.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}@media(min-width:900px){.grid-4{grid-template-columns:repeat(4,1fr)}}
+  .set{background:var(--set);border:1px solid var(--border);border-radius:14px;padding:12px}.dark .set{background:#121722;border-color:#2a2f37}
+  .badge{display:inline-block;padding:4px 10px;border-radius:999px;border:1px solid var(--border);cursor:pointer}.badge.active{background:var(--blue);color:#fff;border-color:var(--blue)}
+  .pill{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid var(--border);font-size:12px;color:var(--muted)}
+  .pr{background:var(--good);color:#fff;padding:2px 6px;border-radius:8px;font-size:12px;margin-left:8px}.title-row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  h3{margin:14px 0 8px;font-size:18px}.danger{color:#f87171}.success{color:#4ade80}.warning{color:#fbbf24}
+</style>
+</head>
+<body>
+<div id="root" style="padding:16px">
+  Loading TrainingApp...
+</div>
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script>
+window.addEventListener("error", function (event) {
+  const root = document.getElementById("root");
+  if (root && root.textContent.includes("Loading TrainingApp")) {
+    root.innerHTML = '<pre style="white-space:pre-wrap;color:#dc2626">TrainingApp could not start.\n\n' +
+      String(event.message || "Unknown error") + '</pre>';
+  }
+});
+</script>
+<script type="text/babel" data-presets="env" data-plugins="transform-react-jsx">
+const {useState,useMemo,useEffect} = React;
+
+/* ================= Storage / Helpers ================= */
+const APP_VERSION = "3.0.1";
+const STORAGE_KEY = "hypertrophy-tracker-v300-current";
+const TEMPLATE_KEY = "hypertrophy-tracker-v300-templates";
+const PR_CACHE_KEY = "hypertrophy-tracker-prcache-v2";
+const HISTORY_KEY = "hypertrophy-tracker-v300-history";
+const clone = x => JSON.parse(JSON.stringify(x));
+const makeSet = (over={}) => ({ kg:"", kg_each:"", combo:"", tags:[], notes:"", reps:"", ...over });
+const asNumber = v => (v===""||v==null||Number.isNaN(Number(v))?0:Number(v));
+const parsedReps = s => {
+  if (s.reps) return asNumber(s.reps);
+  const text = [s.combo,s.notes].filter(Boolean).join(" ");
+  const m = String(text).match(/\b(\d{1,3})(?:\s*[x×]|\s*reps?\b|\b)/i);
+  return m ? asNumber(m[1]) : 0;
+};
+const totalLoad = s => {
+  const kg = asNumber(s.kg); const kge = asNumber(s.kg_each);
+  return kg>0?kg:(kge>0?kge*2:0);
+};
+const perfScore = s => totalLoad(s)*parsedReps(s);
+const exKey = ex => `${ex.name}__${ex.variant||''}__${ex.equipment||''}`;
+const loadJSON = (key, fallback) => { try{ const j=localStorage.getItem(key); return j?JSON.parse(j):fallback } catch(e){ return fallback } };
+const saveJSON = (key, val) => { try{ localStorage.setItem(key, JSON.stringify(val)) } catch(e){} };
+const download = (filename, text, mime="text/plain")=>{ const blob=new Blob([text],{type:mime}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=filename; a.click(); URL.revokeObjectURL(url); };
+
+const compactSessionName = s => `${s.date || 'session'} W${s.week}-W${s.workout}`;
+
+const toCSV = (session) => {
+  const rows=[];
+  rows.push(["date","meso","week","workout","bodyweight","start","shoulder_L","forearm_R","lower_back","recovery"].join(","));
+  rows.push([session.date,session.meso,session.week,session.workout,session.bodyweight,session.session_start_time,session.pain?.left_shoulder ?? 0,session.pain?.right_forearm ?? 0,session.pain?.lower_back ?? 0,session.recovery].join(","));
+  rows.push(""); rows.push(["block","exercise","variant","equipment","set","kg","kg_each","reps","tags","notes"].join(","));
+  (session.blocks||[]).forEach(b=>(b.exercises||[]).forEach(ex=>{
+    const baseTags=[]; if(ex.hand_each) baseTags.push("hand-each");
+    (ex.sets?.length?ex.sets:[makeSet()]).forEach((s,idx)=>{
+      const tags=[...(s.tags||[]),...baseTags].filter(Boolean).join("|");
+      const notes=(s.combo||s.notes||"").replaceAll(",",";");
+      rows.push([b.name,ex.name,ex.variant||"",ex.equipment||"",idx+1,s.kg||"",s.kg_each||"",parsedReps(s)||"",tags,notes].join(","));
+    });
+  }));
+  return rows.join("\n");
+};
+
+/* ================= Exercise templates — Meso 6 defaults ================= */
+const ex = {
+  smithIncline: () => ({ name:"Incline Press", variant:"Smith Incline", equipment:"smith", sets:[makeSet(),makeSet(),makeSet()], notes:"Strict stretch; stop before shoulder pain; hips down" }),
+  dbHighIncline: () => ({ name:"Incline Press", variant:"DB High-Incline", equipment:"dumbbell", sets:[makeSet(),makeSet(),makeSet()], notes:"Deep controlled ROM; no wobble-chasing" }),
+  lateralRaise: () => ({ name:"Lateral Raise", equipment:"dumbbell", sets:[makeSet(),makeSet(),makeSet()], notes:"Strict ROM; pauses allowed" }),
+  lyingCurlRope: () => ({ name:"Lying Cable Curl (rope)", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"Forearm watch: no forced stretch/myo" }),
+  sitCableFly: () => ({ name:"Sitting Cable Fly", variant:"low-to-high / upper chest", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"Upper chest; avoid painful bottom stretch" }),
+  sitCableCurlBehind: () => ({ name:"Sitting Cable Curl (behind body)", equipment:"cable", hand_each:true, sets:[makeSet(),makeSet(),makeSet()], notes:"Stretch-biased; 1-2 RIR if forearm talks" }),
+  arnoldPress: () => ({ name:"Arnold Press", equipment:"dumbbell", sets:[makeSet(),makeSet(),makeSet()], notes:"Controlled; no lumbar heave" }),
+  dumbbellCurl: () => ({ name:"Dumbbell Curl", equipment:"dumbbell", hand_each:true, sets:[makeSet(),makeSet(),makeSet()] }),
+
+  latPulldown: () => ({ name:"Lat Pulldown", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"Use straps; clean ROM before load" }),
+  triOHStandingCurlbar: () => ({ name:"Triceps OH Extension (curl bar, standing)", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"Long-head focus; gradual load push this meso" }),
+  hangingLegRaise: () => ({ name:"Hanging Leg Raise", equipment:"free", sets:[makeSet(),makeSet(),makeSet()], notes:"Supplement only; don't fry core" }),
+  tBarRowClose: () => ({ name:"T-Bar Row (close grip)", equipment:"tbar", sets:[makeSet(),makeSet(),makeSet()], notes:"Back/hip watch; use only if stable" }),
+  bracedCableRow: () => ({ name:"Braced Cable Row", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"Preferred when lower back/hip is spicy" }),
+  lyingTriExtIncline: () => ({ name:"Lying Triceps Ext (incline, curl bar)", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()] }),
+  deathmarchTriExt: () => ({ name:"Lying Triceps Ext (Deathmarch)", variant:"drops to 20kg", equipment:"cable", sets:[makeSet(),makeSet(),makeSet(),makeSet(),makeSet(),makeSet(),makeSet(),makeSet()], notes:"Cut short if elbows/forearms complain" }),
+
+  smithPausedFlat: () => ({ name:"Bench Press", variant:"Paused Flat (Smith)", equipment:"smith", sets:[makeSet(),makeSet(),makeSet()], notes:"100kg consolidation; no ego grinders" }),
+  dbFlatOrDecline: () => ({ name:"Bench Press", variant:"DB Flat/Decline", equipment:"dumbbell", sets:[makeSet(),makeSet(),makeSet()], notes:"Slow/deep; avoid shoulder pain bottom" }),
+  aroundTheWorldRaise: () => ({ name:"Around-the-World DB Raise", equipment:"dumbbell", sets:[makeSet(),makeSet(),makeSet()] }),
+  lyingCurlCurlbar: () => ({ name:"Lying Cable Curl (curl bar)", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"Strict ROM; forearm is limiting signal" }),
+  upwardCableFly: () => ({ name:"Cable Upward Fly", variant:"incline / upper chest", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"Seated/braced if possible; upper chest" }),
+  sittingCableCurlBehindAlt: () => ({ name:"Sitting Cable Curl (behind body)", equipment:"cable", hand_each:true, sets:[makeSet(),makeSet(),makeSet()] }),
+  standingMilitaryCurlBar: () => ({ name:"Standing Military Press (curl bar)", equipment:"free", sets:[makeSet(),makeSet(),makeSet()], notes:"30kg baseline; don't turn into standing incline" }),
+  curlBarBiceps: () => ({ name:"Biceps Curl (curl bar)", equipment:"free", sets:[makeSet(),makeSet(),makeSet()] }),
+
+  oneArmPulldown: () => ({ name:"1-Arm Lat Pulldown (supinated→pronated)", equipment:"cable", hand_each:true, sets:[makeSet(),makeSet(),makeSet()], notes:"100kg+ milestone; setup locked before PR" }),
+  skullcrusher: () => ({ name:"Skullcrusher (EZ/curl bar)", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"Watch plateau; consider gradual load push" }),
+  closeGripBenchLite: () => ({ name:"Close-Grip Bench (same bar)", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"Triceps density; stop before elbow ugliness" }),
+  benchLegRaises: () => ({ name:"Bench Leg Raises (negatives)", equipment:"free", sets:[makeSet(),makeSet()], notes:"Supplemental core only" }),
+  dragonCrunch: () => ({ name:"Dragon Crunch", equipment:"free", sets:[makeSet()] }),
+  inclineRopeTriPush: () => ({ name:"1-Arm Overhead Triceps Extension", equipment:"cable", hand_each:true, sets:[makeSet(),makeSet(),makeSet()], notes:"Long head; cleaner than old rope pushdown" }),
+  facePulls: () => ({ name:"Kneeling Rope Face Pull", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()] }),
+  standingRopeCurl: () => ({ name:"Standing Rope Curl", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()] }),
+
+  legCurl: () => ({ name:"Leg Curl (ankle cuff + curl bar)", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"stabilize hips; cuff tight" }),
+  legExt: () => ({ name:"Leg Extension (ankle cuff, cable)", equipment:"cable", sets:[makeSet(),makeSet(),makeSet()], notes:"slow eccentrics" }),
+  rdl: () => ({ name:"RDL", equipment:"smith/free", sets:[makeSet(),makeSet(),makeSet()], notes:"Only if back/hip 0-1/10" }),
+  splitSquat: () => ({ name:"Bulgarian Split Squat (DB)", equipment:"dumbbell", sets:[makeSet(),makeSet(),makeSet()], notes:"Meat-trunk stimulus; don't die" }),
+  smithSquat: () => ({ name:"Smith Squat", equipment:"smith", sets:[makeSet(),makeSet(),makeSet()], notes:"Controlled; no lower-back heroics" }),
+};
+
+const blocksW1 = () => ([
+  { name:"Superset 1", exercises:[ ex.smithIncline(), ex.lateralRaise(), ex.lyingCurlRope() ] },
+  { name:"Superset 2", exercises:[ ex.sitCableFly(), ex.sitCableCurlBehind(), ex.arnoldPress() ] },
+  { name:"Leg Module (optional)", exercises:[ ex.smithSquat() ] },
+  { name:"Additional", exercises:[ ex.dumbbellCurl() ] },
+]);
+const blocksW2 = () => ([
+  { name:"Superset 1", exercises:[ ex.latPulldown(), ex.triOHStandingCurlbar(), ex.hangingLegRaise() ] },
+  { name:"Superset 2", exercises:[ ex.tBarRowClose(), ex.lyingTriExtIncline() ] },
+  { name:"Additional", exercises:[ ex.deathmarchTriExt() ] },
+  { name:"Leg Module (optional)", exercises:[ ex.legExt() ] },
+]);
+const blocksW3 = () => ([
+  { name:"Superset 1", exercises:[ ex.smithPausedFlat(), ex.aroundTheWorldRaise(), ex.lyingCurlCurlbar() ] },
+  { name:"Superset 2", exercises:[ ex.upwardCableFly(), ex.sittingCableCurlBehindAlt(), ex.standingMilitaryCurlBar() ] },
+  { name:"Leg Module (optional)", exercises:[ ex.legCurl() ] },
+  { name:"Additional", exercises:[ ex.curlBarBiceps() ] },
+]);
+const blocksW4 = () => ([
+  { name:"Superset 1", exercises:[ ex.oneArmPulldown(), ex.skullcrusher(), ex.closeGripBenchLite(), ex.benchLegRaises(), ex.dragonCrunch() ] },
+  { name:"Superset 2", exercises:[ ex.bracedCableRow(), ex.inclineRopeTriPush() ] },
+  { name:"Additional", exercises:[ ex.facePulls(), ex.standingRopeCurl() ] },
+  { name:"Leg Module (optional)", exercises:[] },
+]);
+const defaultBlocksForWorkout = w => ({1:blocksW1,2:blocksW2,3:blocksW3,4:blocksW4}[Number(w)] || blocksW1)();
+const defaultSession = (keep={}) => ({
+  app_version:APP_VERSION, date:new Date().toISOString().slice(0,10), meso:6, week:1, workout:1, bodyweight:"", session_start_time:"",
+  toggles:{has_time_for_finishers:true}, pain:{left_shoulder:0,right_forearm:0,lower_back:0}, recovery:"average", notes:"",
+  blocks:defaultBlocksForWorkout(1), theme:"dark", ui:{comfortable:true}, ...keep
+});
+
+/* ================= Data normalization ================= */
+const normalizeSession = (raw) => {
+  const base = defaultSession();
+  const source = raw && typeof raw === "object" ? raw : {};
+  return {
+    ...base,
+    ...source,
+    toggles: {...base.toggles, ...(source.toggles || {})},
+    pain: {...base.pain, ...(source.pain || {})},
+    ui: {...base.ui, ...(source.ui || {})},
+    blocks: Array.isArray(source.blocks) ? source.blocks : base.blocks,
+    theme: source.theme === "light" ? "light" : "dark"
+  };
+};
+
+/* ================= Components ================= */
+function ExerciseCard({ blockIdx, exIdx, ex, setSession, updateField, addSet, removeLastSet, bestPR, replaceExercise, moveExercise, deleteExercise }){
+  const [showTags,setShowTags] = useState(false);
+  const [editing,setEditing] = useState(false);
+  const isDB = ex.equipment === "dumbbell";
+  const bestAllTime = bestPR || 0;
+  return <div className="card" style={{marginTop:12}}>
+    <div className="title-row">
+      <div>
+        <div style={{fontWeight:700}}>{ex.name} {ex.variant ? <span className="muted">— {ex.variant}</span> : null}</div>
+        <div className="muted">{ex.equipment || ""}{ex.hand_each ? " · hand each" : ""}{ex.notes ? ` · ${ex.notes}` : ""}</div>
+      </div>
+      <div className="row">
+        <button className="button ghost" onClick={()=>setEditing(v=>!v)}>Edit</button>
+        <button className="button ghost" onClick={()=>moveExercise(blockIdx,exIdx,-1)}>↑</button>
+        <button className="button ghost" onClick={()=>moveExercise(blockIdx,exIdx,1)}>↓</button>
+      </div>
+    </div>
+
+    {editing && <div className="set grid" style={{marginTop:12}}>
+      <input value={ex.name||""} placeholder="Exercise name" onChange={e=>updateField(`blocks.${blockIdx}.exercises.${exIdx}.name`, e.target.value)}/>
+      <input value={ex.variant||""} placeholder="Variant" onChange={e=>updateField(`blocks.${blockIdx}.exercises.${exIdx}.variant`, e.target.value)}/>
+      <select value={ex.equipment||""} onChange={e=>updateField(`blocks.${blockIdx}.exercises.${exIdx}.equipment`, e.target.value)}>
+        {["cable","dumbbell","smith","tbar","free","machine","bodyweight"].map(v=><option key={v} value={v}>{v}</option>)}
+      </select>
+      <label className="row muted"><input type="checkbox" checked={!!ex.hand_each} onChange={e=>updateField(`blocks.${blockIdx}.exercises.${exIdx}.hand_each`, e.target.checked)}/> Hand each</label>
+      <textarea placeholder="Exercise notes" value={ex.notes||""} onChange={e=>updateField(`blocks.${blockIdx}.exercises.${exIdx}.notes`, e.target.value)} />
+      <div className="row">
+        <button className="button destructive" onClick={()=>deleteExercise(blockIdx,exIdx)}>Delete exercise</button>
+      </div>
+    </div>}
+
+    <div style={{marginTop:12}} className="grid">
+      {(ex.sets||[]).map((s,i)=>{
+        const score=perfScore(s); const isPR=score>0 && bestAllTime>0 && score>=bestAllTime;
+        const comboValue = (s.combo && s.combo!=="") ? s.combo : [s.reps||"",s.notes||""].filter(Boolean).join(" | ");
+        return <div className="set grid" key={i} style={{gridTemplateColumns:"1fr 3fr"}}>
+          <input placeholder={isDB?"kg each":"kg"} value={isDB?(s.kg_each||""):(s.kg||"")} onChange={e=> updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.${isDB?"kg_each":"kg"}`, e.target.value)} />
+          <input placeholder="reps + notes (e.g. 16 / +3 myo, strict)" value={comboValue} onChange={e=>{
+            const val=e.target.value; updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.combo`, val);
+            const m=val.match(/\b(\d{1,3})\b/); updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.reps`, m?m[1]:"");
+          }}/>
+          <div className="muted" style={{gridColumn:"1 / -1"}}>PR score: {score}{isPR && <span className="pr">All-time PR ✓</span>} <span style={{marginLeft:8}}>Best: {bestAllTime}</span></div>
+          {showTags && <div style={{gridColumn:"1 / -1"}} className="row">
+            {["pause","myo","ROM-reduced","tempo-slow","stretch-focus","dropset","deathmarch","pain-adjusted","PR-attempt"].map(tag=>{
+              const active=(s.tags||[]).includes(tag);
+              return <span key={tag} className={`badge ${active?"active":""}`} onClick={()=>{
+                const cur=new Set(s.tags||[]); cur.has(tag)?cur.delete(tag):cur.add(tag);
+                updateField(`blocks.${blockIdx}.exercises.${exIdx}.sets.${i}.tags`, Array.from(cur));
+              }}>{tag}</span>;
+            })}
+          </div>}
+        </div>;
+      })}
+    </div>
+
+    <div className="row" style={{marginTop:12}}>
+      <button className="button" onClick={()=>setShowTags(v=>!v)}>{showTags?"Hide tags":"Show tags"}</button>
+      <button className="button" onClick={()=>addSet(blockIdx,exIdx)}>+ Set</button>
+      <button className="button" onClick={()=>removeLastSet(blockIdx,exIdx)}>Remove set</button>
+    </div>
+  </div>;
+}
+
+function App(){
+  const [session,setSession] = useState(()=> normalizeSession(loadJSON(STORAGE_KEY, defaultSession())));
+  const [templates,setTemplates] = useState(()=> loadJSON(TEMPLATE_KEY, null) || {1:blocksW1(),2:blocksW2(),3:blocksW3(),4:blocksW4()});
+  const [prCache,setPrCache] = useState(()=> loadJSON(PR_CACHE_KEY, {}));
+  const [history,setHistory] = useState(()=> loadJSON(HISTORY_KEY, []));
+
+  useEffect(()=>saveJSON(STORAGE_KEY, session),[session]);
+  useEffect(()=>saveJSON(TEMPLATE_KEY, templates),[templates]);
+  useEffect(()=>saveJSON(HISTORY_KEY, history),[history]);
+  useEffect(()=>{document.documentElement.classList.toggle('dark', session.theme==='dark')},[session.theme]);
+
+  useEffect(()=>{
+    const next={...prCache};
+    (session.blocks||[]).forEach(b=>(b.exercises||[]).forEach(exr=>{
+      const key=exKey(exr); const best=(exr.sets||[]).reduce((m,s)=>Math.max(m,perfScore(s)),0);
+      if(best>(next[key]||0)) next[key]=best;
+    }));
+    if(JSON.stringify(next)!==JSON.stringify(prCache)){setPrCache(next);saveJSON(PR_CACHE_KEY,next)}
+  },[session]);
+
+  const updateField = (path,value)=> setSession(prev=>{ const st=clone(prev); const segs=path.split('.'); let obj=st; for(let i=0;i<segs.length-1;i++) obj=obj[segs[i]]; obj[segs.at(-1)]=value; return st; });
+  const addSet = (b,e)=> setSession(prev=>{const st=clone(prev); st.blocks[b].exercises[e].sets.push(makeSet()); return st});
+  const removeLastSet = (b,e)=> setSession(prev=>{const st=clone(prev); st.blocks[b].exercises[e].sets.pop(); return st});
+  const moveExercise = (b,e,dir)=> setSession(prev=>{const st=clone(prev); const arr=st.blocks[b].exercises; const ni=e+dir; if(ni<0||ni>=arr.length)return st; [arr[e],arr[ni]]=[arr[ni],arr[e]]; return st});
+  const deleteExercise = (b,e)=> setSession(prev=>{const st=clone(prev); st.blocks[b].exercises.splice(e,1); return st});
+  const addExerciseToBlock = (b)=> setSession(prev=>{const st=clone(prev); st.blocks[b].exercises.push({name:"New Exercise",equipment:"cable",sets:[makeSet(),makeSet(),makeSet()]}); return st});
+
+  const onWorkoutChange = (w)=> setSession(prev=>({...prev, workout:Number(w), blocks: clone(templates[String(w)] || defaultBlocksForWorkout(Number(w)))}));
+  const saveCurrentAsTemplate = ()=>{
+    const w=String(session.workout); setTemplates(prev=>({...prev,[w]:clone(session.blocks)})); alert(`Saved current W${w} layout as default template. Future you has less rewriting. Praise the gains.`);
+  };
+  const restoreBuiltInTemplate = ()=>{
+    const w=Number(session.workout); const blocks=defaultBlocksForWorkout(w); setTemplates(prev=>({...prev,[String(w)]:clone(blocks)})); setSession(prev=>({...prev, blocks:clone(blocks)}));
+  };
+  const finishSession = ()=>{
+    const entry={date:session.date, meso:session.meso, week:session.week, workout:session.workout, bodyweight:session.bodyweight, summary:session.notes||"", savedAt:new Date().toISOString()};
+    setHistory(prev=>[entry,...prev].slice(0,20));
+    alert("Session added to local history. Export JSON too, because browsers are goblins.");
+  };
+
+  const hasFinishers = session.toggles?.has_time_for_finishers ?? true;
+
+const visibleBlockPairs = useMemo(
+  () => (session.blocks || [])
+    .map((b, idx) => ({ b, idx }))
+    .filter(({ b }) => hasFinishers || b.name !== "Additional"),
+  [session.blocks, hasFinishers]
+);
+
+  const swapChest = (which)=> setSession(prev=>{
+    const s=clone(prev); const sup1=s.blocks[0]; const idx=sup1.exercises.findIndex(e=>e.name==="Incline Press"||e.name==="Bench Press"); if(idx===-1)return s;
+    if(Number(s.workout)===1) sup1.exercises[idx]=which==="smith"?ex.smithIncline():ex.dbHighIncline();
+    if(Number(s.workout)===3) sup1.exercises[idx]=which==="smith"?ex.smithPausedFlat():ex.dbFlatOrDecline();
+    return s;
+  });
+  const setLegModule = (kind)=> setSession(prev=>{
+    const s=clone(prev); let b=s.blocks.find(x=>x.name.startsWith("Leg Module")); if(!b){b={name:"Leg Module (optional)",exercises:[]}; s.blocks.push(b)}
+    const map={none:[],curl:[ex.legCurl()],ext:[ex.legExt()],rdl:[ex.rdl()],split:[ex.splitSquat()],squat:[ex.smithSquat()]}; b.exercises=map[kind]||[]; return s;
+  });
+  const setRowVariant = (kind)=> setSession(prev=>{
+    const s=clone(prev); const block=s.blocks.find(x=>x.name==="Superset 2"); if(!block)return s;
+    const idx=block.exercises.findIndex(e=>e.name.includes("Row")); if(idx<0)return s;
+    block.exercises[idx]=kind==="braced"?ex.bracedCableRow():ex.tBarRowClose(); return s;
+  });
+
+  const exportJSON = ()=> download(`workout-${session.date}-M${session.meso}-W${session.week}W${session.workout}.json`, JSON.stringify(session,null,2), "application/json");
+  const exportCSV = ()=> download(`workout-${session.date}-M${session.meso}-W${session.week}W${session.workout}.csv`, toCSV(session), "text/csv");
+  const importJSON = (file)=>{const r=new FileReader(); r.onload=ev=>{try{setSession(normalizeSession(JSON.parse(ev.target.result)))}catch(e){alert("Invalid JSON")}}; r.readAsText(file)};
+
+  const painFlag = Math.max(asNumber(session.pain?.left_shoulder), asNumber(session.pain?.right_forearm), asNumber(session.pain?.lower_back));
+
+  return <div className="container">
+    <div className="row" style={{justifyContent:"space-between"}}>
+      <div><h1>Hypertrophy Tracker — v{APP_VERSION}</h1><div className="muted">Meso 6-ready · editable templates · injury flags · less app-admin cardio</div></div>
+      <div className="row">
+        <button className="button" onClick={exportCSV}>CSV</button><button className="button" onClick={exportJSON}>JSON</button>
+        <label className="button">Import JSON<input type="file" accept="application/json" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0]; if(f) importJSON(f); e.target.value=""}}/></label>
+        <button className="button ghost" onClick={()=>setSession(p=>({...p,theme:p.theme==="dark"?"light":"dark"}))}>{session.theme==="dark"?"Light":"Dark"}</button>
+      </div>
+    </div>
+
+    <div className="card" style={{marginTop:12}}>
+      <div className="grid grid-4">
+        <input placeholder="Meso" value={session.meso||6} onChange={e=>setSession(p=>({...p,meso:e.target.value}))}/>
+        <select value={String(session.week)} onChange={e=>setSession(p=>({...p,week:Number(e.target.value)}))}>{[1,2,3,4,5,6,7,8].map(w=><option key={w} value={w}>Week {w}</option>)}</select>
+        <select value={String(session.workout)} onChange={e=>onWorkoutChange(e.target.value)}>{[1,2,3,4].map(w=><option key={w} value={w}>Workout W{w}</option>)}</select>
+        <input type="date" value={session.date} onChange={e=>setSession(p=>({...p,date:e.target.value}))}/>
+        <input placeholder="Bodyweight (kg)" value={session.bodyweight} onChange={e=>setSession(p=>({...p,bodyweight:e.target.value}))}/>
+        <input type="time" value={session.session_start_time} onChange={e=>setSession(p=>({...p,session_start_time:e.target.value}))}/>
+        <select value={session.recovery||"average"} onChange={e=>setSession(p=>({...p,recovery:e.target.value}))}><option>well-rested</option><option>average</option><option>fatigued</option><option>sick/ill</option></select>
+        <label className="row muted"><input type="checkbox" checked={!!session.toggles?.has_time_for_finishers} onChange={e=>setSession(p=>({...p,toggles:{...(p.toggles||{}),has_time_for_finishers:e.target.checked}}))}/> Finishers</label>
+      </div>
+      <div className="grid grid-4" style={{marginTop:12}}>
+        <input placeholder="Left shoulder pain 0-10" value={session.pain?.left_shoulder ?? 0} onChange={e=>setSession(p=>({...p,pain:{...(p.pain||{}),left_shoulder:e.target.value}}))}/>
+        <input placeholder="Right forearm pain 0-10" value={session.pain?.right_forearm ?? 0} onChange={e=>setSession(p=>({...p,pain:{...(p.pain||{}),right_forearm:e.target.value}}))}/>
+        <input placeholder="Lower back/hip 0-10" value={session.pain?.lower_back ?? 0} onChange={e=>setSession(p=>({...p,pain:{...(p.pain||{}),lower_back:e.target.value}}))}/>
+        <div className="card" style={{padding:12}}><div className="muted">Readiness</div><b className={painFlag>=4?"danger":painFlag>=2?"warning":"success"}>{painFlag>=4?"Modify hard":painFlag>=2?"Be smart":"Green light"}</b></div>
+      </div>
+      <div className="row" style={{marginTop:12}}>
+        {(session.workout===1||session.workout===3) && <><button className="button" onClick={()=>swapChest("smith")}>Smith chest</button><button className="button" onClick={()=>swapChest("db")}>DB chest</button></>}
+        {session.workout===2 && <><button className="button" onClick={()=>setRowVariant("tbar")}>T-Bar Row</button><button className="button" onClick={()=>setRowVariant("braced")}>Braced Row</button></>}
+        <button className="button" onClick={()=>setLegModule("squat")}>Smith Squat</button><button className="button" onClick={()=>setLegModule("ext")}>Leg Ext</button><button className="button" onClick={()=>setLegModule("curl")}>Leg Curl</button><button className="button" onClick={()=>setLegModule("split")}>Bulgarians</button><button className="button ghost" onClick={()=>setLegModule("none")}>No Legs</button>
+      </div>
+      <div className="row" style={{marginTop:12}}>
+        <button className="button primary" onClick={saveCurrentAsTemplate}>Save current layout as W{session.workout} template</button>
+        <button className="button ghost" onClick={restoreBuiltInTemplate}>Restore built-in W{session.workout}</button>
+        <button className="button destructive" onClick={()=>{if(confirm("Reset current session?")) setSession(defaultSession({theme:session.theme,ui:session.ui,meso:session.meso}))}}>Reset</button>
+      </div>
+    </div>
+
+    <div className="grid" style={{marginTop:16}}>
+      {visibleBlockPairs.map(({b,idx:blockIdx})=><div key={blockIdx}>
+        <div className="title-row"><h3>{b.name}</h3><button className="button ghost" onClick={()=>addExerciseToBlock(blockIdx)}>+ Exercise</button></div>
+        {(b.exercises||[]).map((exercise,exIdx)=><ExerciseCard key={exIdx} blockIdx={blockIdx} exIdx={exIdx} ex={exercise} setSession={setSession} updateField={updateField} addSet={addSet} removeLastSet={removeLastSet} bestPR={prCache[exKey(exercise)]||0} moveExercise={moveExercise} deleteExercise={deleteExercise}/>) }
+      </div>)}
+    </div>
+
+    <div className="card" style={{marginTop:16}}>
+      <textarea rows="4" placeholder="Session notes… e.g. pump, fatigue, pain, sleep, mouse combat" value={session.notes||""} onChange={e=>setSession(p=>({...p,notes:e.target.value}))}/>
+      <div className="row" style={{marginTop:12}}>
+        <button className="button" onClick={exportCSV}>Export CSV</button><button className="button" onClick={exportJSON}>Export JSON</button><button className="button primary" onClick={finishSession}>Mark session done</button>
+      </div>
+    </div>
+
+    {history.length>0 && <div className="card" style={{marginTop:16}}>
+      <div className="title-row"><b>Recent local history</b><button className="button ghost" onClick={()=>setHistory([])}>Clear</button></div>
+      <div className="grid" style={{marginTop:10}}>{history.slice(0,6).map((h,i)=><div className="set" key={i}><b>{compactSessionName(h)}</b> <span className="pill">BW {h.bodyweight||"?"}</span><div className="muted">{h.summary||"No summary"}</div></div>)}</div>
+    </div>}
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
